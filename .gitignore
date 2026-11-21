@@ -1,0 +1,6 @@
+*.log
+
+# Private keys and registration details - never upload these
+hl-cdkey.txt
+pdh-registration.txt
+aoe2-pid.txt

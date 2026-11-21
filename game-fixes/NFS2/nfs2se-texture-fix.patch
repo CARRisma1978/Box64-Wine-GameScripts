@@ -1,0 +1,61 @@
+--- src/nfs140/src/Glide2x/OpenGL2.c	2026-10-28 19:06:59.874531446 +0000
++++ src/Glide2x/OpenGL2.c	2026-10-28 19:36:40.382469098 +0000
+@@ -1098,16 +1098,53 @@
+ REALIGN STDCALL void grTexDownloadMipMap(GrChipID_t tmu, uint32_t startAddress, uint32_t evenOdd, GrTexInfo *info)
+ {
+ 	TextureInfo *ti = &g_textures[startAddress >> 2];
+-	ti->data = &g_textureMem[startAddress];
++	uint32_t newSize = 256 >> info->largeLod;
++	uint16_t *dataIn  = (uint16_t *)info->data;
++	uint16_t *dataOut = (uint16_t *)&g_textureMem[startAddress];
++
++	/* Skip re-uploading a texture identical to the one already stored at
++	 * this address (some screens re-send unchanged textures every frame). */
++	if (ti->data == (uint8_t *)dataOut && ti->fmt == info->format && ti->size == newSize && ti->id)
++	{
++		uint32_t n = newSize * newSize, i;
++		BOOL same = true;
++		switch (info->format)
++		{
++			case GR_TEXFMT_ARGB_1555:
++				for (i = 0; i < n && same; ++i)
++					same = dataOut[i] == (uint16_t)((dataIn[i] << 1) | (dataIn[i] >> 15));
++				break;
++			case GR_TEXFMT_ARGB_4444:
++				for (i = 0; i < n && same; ++i)
++					same = dataOut[i] == (uint16_t)((dataIn[i] << 4) | (dataIn[i] >> 12));
++				break;
++			default:
++				same = memcmp(dataOut, dataIn, n * (info->format == GR_TEXFMT_P_8 ? 1 : 2)) == 0;
++				break;
++		}
++		if (same)
++			return;
++	}
++
++	ti->data = (uint8_t *)dataOut;
+ 	ti->palette = NULL;
+ 	ti->fmt = info->format;
+-	ti->size = 256 >> info->largeLod;
+-
+-	uint16_t *dataIn  = (uint16_t *)info->data;
+-	uint16_t *dataOut = (uint16_t *)ti->data;
++	ti->size = newSize;
+ 
+ 	drawTriangles();
+ 
++	/* Give the new contents a fresh GL texture instead of overwriting the old
++	 * one: the GPU may still be drawing with the old one this frame, and
++	 * overwriting it makes the driver wait for the GPU (about 1.5 ms each on
++	 * a Raspberry Pi 5 - 300 times a frame in the Audio/Graphics/exit menus,
++	 * which dropped them to 3 fps). The driver frees the old texture when
++	 * the GPU has finished with it. */
++	if (ti->id)
++	{
++		glDeleteTextures(1, &ti->id);
++		ti->id = 0;
++	}
++
+ 	// ARGB -> RGBA conversion or copy
+ 	uint32_t sqrSize = ti->size * ti->size, i;
+ 	switch (ti->fmt)
