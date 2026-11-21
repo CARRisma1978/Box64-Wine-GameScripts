@@ -6,6 +6,8 @@ Launch scripts for running classic Windows games from EmulationStation on a **Ra
 
 > **Use at your own risk.** These scripts have only been tested on the setup listed below. Some games need patches or extra files that you have to find or make yourself (see each game's notes), and some need a no-CD patch.
 
+> **Keys and registration details are never stored in the scripts.** Games that need them read them from a small text file in the game's folder (listed in each game's notes below). These files are in `.gitignore`. Keep them private and don't upload them.
+
 ## What the scripts do
 
 Each script starts its own X session from EmulationStation, runs the game in Wine through Box64, and closes everything when the game ends. Along the way they:
@@ -92,6 +94,7 @@ The versions, patches and extras used for each game in my setup, so you can set 
 - Possibly **The Conquerors 1.0e** patch.
 - Wine's own DirectDraw; the picture is zoomed to full height with the mouse fenced so edge-scrolling works.
 - The in-game music is a CD audio track, which Wine only plays from a real CD drive, so there's none. The menu and civilisation themes still play.
+- **Product IDs (optional):** put the Product IDs from your own install in `aoe2-pid.txt` in the game folder: Age of Kings on line 1, The Conquerors on line 2 (e.g. `12345-123-1234567-12345`, copied from the registry of a PC where the game is installed). Without it, all zeros are used. Age of Kings runs with that; The Conquerors hasn't been tested without its own ID.
 
 ### Angry Birds
 - **Sound fix (done by the script):** the game has a start-up race that often leaves it silent under Box64. With `SOUND_PATCH=1`, the script changes 23 bytes in `AngryBirds.exe` so the sound thread waits instead of quitting. The original is kept as `AngryBirds.exe.orig`.
@@ -111,6 +114,7 @@ The versions, patches and extras used for each game in my setup, so you can set 
 
 ### Half-Life
 - Retail WON version (not Steam). Runs in OpenGL; Direct3D is never used, because GoldSrc's Direct3D path hangs the display.
+- **CD key (optional):** put your CD key on the first line of `hl-cdkey.txt` in the game folder, with or without the dashes. It's written into the registry on every launch, so a new Wine prefix doesn't ask for it. Without the file, the game asks for the key as normal.
 
 ### Jazz Jackrabbit 2
 - **Jazz Jackrabbit 2 v1.20** full version, with the official **v1.23** patch.
@@ -168,6 +172,7 @@ The versions, patches and extras used for each game in my setup, so you can set 
 ### Prairie Dog Hunt Pro
 - A 16-bit Windows 3.x program, which Box64 can't run directly: runs through **[otvdm (winevdm)](https://github.com/otya128/winevdm)** in an `otvdm` folder in the game folder.
 - Needs `VBRUN300.DLL` in the game folder.
+- **Registration (optional):** put your registration name on line 1 and your code on line 2 of `pdh-registration.txt` in the game folder. On first run the script writes them into `pdhpro.ini` (delete that file to have it made again). Without the file, the game starts unregistered.
 
 ### Quake II
 - **Quake II v3.24** (Knightmare's unofficial patch), OpenGL renderer (`ref_gl.dll`).
