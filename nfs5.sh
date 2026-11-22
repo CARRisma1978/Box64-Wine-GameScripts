@@ -196,11 +196,8 @@ EOF
             "$WINEPREFIX/system.reg"
     fi
     # nGlide Resolution = "By desktop" (1), so it always matches DESK_RES
-    local key
-    for key in nGlide nGlide2; do
-        sed -i '/^\[Software\\\\Zeus Software\\\\'"$key"'\]/,/^\[/ s/^"Resolution"=".*"/"Resolution"="1"/' \
-            "$WINEPREFIX/user.reg"
-    done
+    sed -i '/^\[Software\\\\Zeus Software\\\\nGlide2\?\]/,/^$/ s/^"Resolution"=".*"/"Resolution"="1"/' \
+        "$WINEPREFIX/user.reg"                  # (nGlide and nGlide2)
 }
 
 # TV stays at NATIVE_RES; the X screen is DESK_RES, scaled up to fill it

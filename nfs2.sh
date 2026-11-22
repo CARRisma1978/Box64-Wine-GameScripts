@@ -138,13 +138,27 @@ set_display() {
     sleep 1
 }
 
-# Set Key=Value in nfs2se.conf (keeps a Windows line ending if the file has them)
+# set_conf Key=Value... - sets them all in nfs2se.conf in one pass: an
+# existing Key= line is changed (keeping a Windows line ending if it has
+# one), a missing one is added at the end
 set_conf() {
-    if grep -q "^$1=" "$CONF_FILE"; then
-        sed -i "s|^$1=[^[:cntrl:]]*|$1=$2|" "$CONF_FILE"
-    else
-        echo "$1=$2" >> "$CONF_FILE"
-    fi
+    local tmp="$CONF_FILE.tmp"
+    awk -v list="$(printf '%s\n' "$@")" '
+        BEGIN {
+            n = split(list, kv, "\n")
+            for (i = 1; i <= n; i++) {
+                e = index(kv[i], "="); key[i] = substr(kv[i], 1, e - 1)
+                val[key[i]] = substr(kv[i], e + 1)
+            }
+        }
+        {
+            cr = sub(/\r$/, ""); e = index($0, "="); k = substr($0, 1, e - 1)
+            if (e && (k in val)) { $0 = k "=" val[k]; done[k] = 1 }
+            print $0 (cr ? "\r" : "")
+        }
+        END { for (i = 1; i <= n; i++) if (!(key[i] in done)) print key[i] "=" val[key[i]] }
+    ' "$CONF_FILE" > "$tmp" && mv "$tmp" "$CONF_FILE" \
+        || { rm -f "$tmp"; echo "WARNING: could not update $CONF_FILE"; }
 }
 
 # Runs before X, with Wine fully stopped afterwards
@@ -186,13 +200,13 @@ EOF
         cp "$CONF_TEMPLATE" "$CONF_FILE"
         echo "Created $CONF_FILE from template"
     fi
-    set_conf StartInFullScreen         1
-    set_conf VSync                     "$VSYNC"
-    set_conf FixedRenderingSize        0
-    set_conf WindowSize                "$GAME_RES"
-    set_conf KeepAspectRatio           "$KEEP_ASPECT"
-    set_conf LinearTextureFiltering    "$TEXTURE_FILTER"
-    set_conf JoystickDisableAxesInMenu "$(( 1 - MENU_JOY_AXES ))"
+    set_conf StartInFullScreen=1 \
+             VSync="$VSYNC" \
+             FixedRenderingSize=0 \
+             WindowSize="$GAME_RES" \
+             KeepAspectRatio="$KEEP_ASPECT" \
+             LinearTextureFiltering="$TEXTURE_FILTER" \
+             JoystickDisableAxesInMenu="$(( 1 - MENU_JOY_AXES ))"
 }
 
 cleanup() {

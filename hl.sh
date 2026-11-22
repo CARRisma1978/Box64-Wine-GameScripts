@@ -31,8 +31,9 @@ export WINEPREFIX="$HOME/wine-prefixes/hl"
 LOG_FILE="$GAME_DIR/hl-launch.log"
 
 # CD key: put it on the first line of this file (just the key - with or
-# without the dashes, e.g. 1234-56789-0123 or 1234567890123). It's written
-# into the registry every launch, so a new Wine prefix doesn't ask for it.
+# without the dashes, e.g. 1234-56789-0123 or 1234567890123). It's imported
+# into the registry once (again if it changes), so a new Wine prefix doesn't
+# ask for it.
 # Keep this file private - don't upload it to GitHub. No file = the game
 # asks for the key as normal.
 CDKEY_FILE="$GAME_DIR/hl-cdkey.txt"                # \\<pi>\roms\windows\half-life\hl-cdkey.txt
@@ -101,7 +102,7 @@ GL_ARGS="+gl_ztrick 0 +gl_texturemode GL_LINEAR_MIPMAP_LINEAR"
 # 1 = a private PulseAudio just for this game.
 # If the chosen mixer can't start, plain ALSA is used.
 # ES and emulators keep plain ALSA in every case.
-SOUND_MIXER=0
+SOUND_MIXER=2
 HDMI_CARD="vc4hdmi0"        # vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
 PA_LATENCY_MS=60            # SOUND_MIXER=1: sound buffered between the game and
                             # PulseAudio: higher = safer from clicks, sound
@@ -335,9 +336,13 @@ setup_prefix() {
     # the game starts (that stopped Wine's display starting - no game window)
     prefix_setup hl
 
-    # Wine settings + starting values for the game's video settings, imported
-    # only when they change (each import is a full Box64 + Wine start-up)
+    # Wine settings + starting values for the game's video settings, and the
+    # CD key from CDKEY_FILE (the game keeps it as "Key", the bare 13 digits -
+    # only letters and digits are kept). Imported only when they change (each
+    # import is a full Box64 + Wine start-up). The key itself is never logged.
     local reg_new="$WINEPREFIX/drive_c/hl-settings.reg" reg_old="$WINEPREFIX/hl-settings.applied"
+    local cdkey=""
+    [ -f "$CDKEY_FILE" ] && cdkey="$(head -n 1 "$CDKEY_FILE" | tr -cd 'A-Za-z0-9')"
     cat > "$reg_new" <<EOF
 REGEDIT4
 
@@ -357,6 +362,7 @@ REGEDIT4
 "EngineModeH"=dword:$(printf '%08x' "$GH")
 "EngineModeBPP"=dword:00000020
 "EngineModeWindowed"=dword:00000001
+${cdkey:+\"Key\"=\"$cdkey\"}
 EOF
     # Wine's sound output: PulseAudio (mixer 1), ALSA (mixer 2) or the default (ALSA)
     { echo; echo '[HKEY_CURRENT_USER\Software\Wine\Drivers]'
@@ -366,18 +372,8 @@ EOF
 
     # The game's Video menu saves its own choices over these. Put ours back
     # every launch - edited straight in user.reg, so no start-up time.
-    # Also the CD key from CDKEY_FILE: the game keeps it as "Key" in the same
-    # registry key (found by comparing the prefix before and after entering
-    # it), as the bare 13 digits - no dashes or spaces, so only letters and
-    # digits are kept. The key itself is never logged.
     local key='^\[Software\\\\Valve\\\\Half-Life\\\\Settings\]'
-    local cdkey="" keydel="" add
-    [ -f "$CDKEY_FILE" ] && cdkey="$(head -n 1 "$CDKEY_FILE" | tr -cd 'A-Za-z0-9')"
-    add="\"EngineMode\"=dword:$(printf '%08x' "$MODE_IDX")\n\"EngineType\"=dword:0000000$ENGINE_TYPE"
-    if [ -n "$cdkey" ]; then
-        keydel='/^"Key"=/d'
-        add="$add\n\"Key\"=\"$cdkey\""
-    fi
+    local add="\"EngineMode\"=dword:$(printf '%08x' "$MODE_IDX")\n\"EngineType\"=dword:0000000$ENGINE_TYPE"
     sed -i "/$key/I,/^\[/ {
         s/^\(\"EngineD3D\"\)=dword:.*/\1=dword:00000000/I
         s/^\(\"EngineModeW\"\)=dword:.*/\1=dword:$(printf '%08x' "$GW")/I
@@ -386,7 +382,6 @@ EOF
         s/^\(\"EngineModeWindowed\"\)=dword:.*/\1=dword:00000001/I
         /^\"EngineMode\"=/Id
         /^\"EngineType\"=/Id
-        $keydel
         /^\"EngineModeW\"=/I a $add
     }" "$WINEPREFIX/user.reg"
 

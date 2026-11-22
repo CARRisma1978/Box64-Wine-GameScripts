@@ -194,16 +194,15 @@ EOF
     } >> "$reg_new"
     import_reg "$reg_new" "$reg_old"
 
-    # HP2's own keys (normally written by its installer) - first run only.
+    # HP2's own keys (normally written by its installer), imported only when
+    # they change - e.g. a new prefix or a moved game folder (shared code).
     # 32-bit game, so they go in both registry views (incl. Wow6432Node).
-    # Delete .nfs6_install_keys in the prefix folder to write them again.
-    local mark="$WINEPREFIX/.nfs6_install_keys" keys="$WINEPREFIX/drive_c/nfs6-install.reg" view win_dir
-    if [ ! -f "$mark" ]; then
-        win_dir="Z:$(echo "$GAME_DIR" | sed 's|/|\\\\|g')\\\\"    # Z:\\home\\pi\\...\\nfs6\\
-        {
-            echo 'REGEDIT4'
-            for view in 'SOFTWARE' 'SOFTWARE\Wow6432Node'; do
-                cat <<EOF
+    local keys="$WINEPREFIX/drive_c/nfs6-install.reg" view win_dir
+    win_dir="Z:$(echo "$GAME_DIR" | sed 's|/|\\\\|g')\\\\"    # Z:\\home\\pi\\...\\nfs6\\
+    {
+        echo 'REGEDIT4'
+        for view in 'SOFTWARE' 'SOFTWARE\Wow6432Node'; do
+            cat <<EOF
 
 [HKEY_LOCAL_MACHINE\\$view\\EA GAMES\\Need For Speed Hot Pursuit 2]
 "Installed From"="D:\\\\"
@@ -222,12 +221,9 @@ EOF
 "DisplayName"="Need For Speed Hot Pursuit 2"
 "LanguageName"="English UK"
 EOF
-            done
-        } > "$keys"
-        echo "Writing HP2's install keys (first run only)..."
-        wine regedit /S 'C:\nfs6-install.reg' && touch "$mark"
-        wineserver -w
-    fi
+        done
+    } > "$keys"
+    import_reg "$keys" "$WINEPREFIX/nfs6-install.applied"
 }
 
 # Zooming (zoom_to - with "W H X Y AW AH", the area is shown as AW:AH), the

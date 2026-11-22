@@ -155,11 +155,8 @@ EOF
 
     # nGlide Resolution = "By desktop" (1), edited straight in user.reg
     # (Wine has stopped), so it always matches the Wine desktop
-    local key
-    for key in nGlide nGlide2; do
-        sed -i '/^\[Software\\\\Zeus Software\\\\'"$key"'\]/,/^\[/ s/^"Resolution"=".*"/"Resolution"="1"/' \
-            "$WINEPREFIX/user.reg"
-    done
+    sed -i '/^\[Software\\\\Zeus Software\\\\nGlide2\?\]/,/^$/ s/^"Resolution"=".*"/"Resolution"="1"/' \
+        "$WINEPREFIX/user.reg"                  # (nGlide and nGlide2)
 }
 
 run_game() {

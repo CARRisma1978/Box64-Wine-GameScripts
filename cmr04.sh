@@ -175,8 +175,14 @@ setup_prefix() {
     ln -sfn "$GAME_DIR" "$d_root/cmr4_pc_data"
     ln -sfn "$d_root" "$WINEPREFIX/dosdevices/d:"
 
-    # Registry - imported only when something changed (each import is a full
-    # Box64 + Wine start-up, several seconds)
+    # Videos: LAV Filters (shared code) - installed once, before the registry
+    # below (which then includes their settings); LAV Splitter at normal
+    # priority (merit 0x00600000), so it opens the game's .wmv videos
+    [ "$VIDEOS" = "1" ] && lav_setup "$LAV_DIR" 00600000 "videos stay silent"
+
+    # Registry - the settings below, plus the videos' when LAV Filters are
+    # installed. Imported only when something changed (each import is a full
+    # Box64 + Wine start-up, several seconds) - one import for both.
     local reg_new="$WINEPREFIX/drive_c/cmr04-settings.reg"
     local reg_old="$WINEPREFIX/cmr04-settings.applied"
     cat > "$reg_new" <<EOF
@@ -214,6 +220,38 @@ REGEDIT4
 [HKEY_CURRENT_USER\\Software\\Wine\\Drivers]
 $(case "$SOUND_MIXER" in 1) echo '"Audio"="pulse"' ;; 2) echo '"Audio"="alsa"' ;; *) echo '"Audio"=-' ;; esac)
 EOF
+    if [ "$VIDEOS" = "1" ] && [ "$LAV_INSTALLED" = "1" ]; then
+        local mt='Media Type\{e436eb83-524f-11ce-9f53-0020af0ba770}\{3DB80F90-9412-11D1-ADED-0000F8754B99}'
+        cat >> "$reg_new" <<EOF
+
+; Videos: .wmv / .asf opened by LAV Splitter Source (separate picture and
+; sound outputs, like Windows' own ASF reader). Matched by the ASF header
+; bytes at the start of the file - NOT by file extension: in Wine an
+; "Extensions\\.wmv" key makes AddSourceFilter fall back to the plain file
+; reader without reading its "Source Filter". In both registry views: the
+; 64-bit one and the 32-bit game's (Wow6432Node).
+[HKEY_LOCAL_MACHINE\\Software\\Classes\\$mt]
+"0"="0,16,FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,3026B2758E66CF11A6D900AA0062CE6C"
+"Source Filter"="{B98D13E7-55DB-4385-A33D-09FD1BA26338}"
+
+[HKEY_LOCAL_MACHINE\\Software\\Classes\\Wow6432Node\\$mt]
+"0"="0,16,FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,3026B2758E66CF11A6D900AA0062CE6C"
+"Source Filter"="{B98D13E7-55DB-4385-A33D-09FD1BA26338}"
+
+[HKEY_CURRENT_USER\\Software\\LAV\\Splitter\\Formats]
+"asf"=dword:00000001
+
+; LAV Audio: 16-bit output only (float gave white noise in X2)
+[HKEY_CURRENT_USER\\Software\\LAV\\Audio]
+"SampleFormats"=hex:01,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+"OutputFormats"=hex:01,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+
+[HKEY_CURRENT_USER\\Software\\LAV\\Audio\\Formats]
+"wma"=dword:00000001
+"wmapro"=dword:00000001
+"wmalossless"=dword:00000001
+EOF
+    fi
     import_reg "$reg_new" "$reg_old"
 
     game_res_setup
@@ -253,53 +291,6 @@ game_res_setup() {
         sec && tolower($0) ~ /^"height"=dword:/ { sub(/^[^:]*:/, ""); h = $0 }
         END { print w, h }' "$reg")
     [ -n "$w" ] && [ -n "$h" ] && CUR_RES="$((16#$w))x$((16#$h))"
-}
-
-# Videos: LAV Filters (shared code) - installed once; LAV Splitter at normal
-# priority (merit 0x00600000), so it opens the game's .wmv videos
-setup_videos() {
-    [ "$VIDEOS" = "1" ] || return 0
-    lav_setup "$LAV_DIR" 00600000 "videos stay silent"
-}
-
-# Videos: registry settings, re-imported whenever they change
-setup_video_registry() {
-    [ "$VIDEOS" = "1" ] && [ "$LAV_INSTALLED" = "1" ] || return
-    local reg="$WINEPREFIX/drive_c/cmr04-videos.reg" reg_old="$WINEPREFIX/cmr04-videos.applied"
-
-    cat > "$reg" <<EOF
-REGEDIT4
-
-; .wmv / .asf opened by LAV Splitter Source (separate picture and sound
-; outputs, like Windows' own ASF reader). Matched by the ASF header bytes at
-; the start of the file - NOT by file extension: in Wine an
-; "Extensions\\.wmv" key makes AddSourceFilter fall back to the plain file
-; reader without reading its "Source Filter".
-[HKEY_CLASSES_ROOT\\Media Type\\{e436eb83-524f-11ce-9f53-0020af0ba770}\\{3DB80F90-9412-11D1-ADED-0000F8754B99}]
-"0"="0,16,FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,3026B2758E66CF11A6D900AA0062CE6C"
-"Source Filter"="{B98D13E7-55DB-4385-A33D-09FD1BA26338}"
-
-[HKEY_CURRENT_USER\\Software\\LAV\\Splitter\\Formats]
-"asf"=dword:00000001
-
-; LAV Audio: 16-bit output only (float gave white noise in X2)
-[HKEY_CURRENT_USER\\Software\\LAV\\Audio]
-"SampleFormats"=hex:01,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
-"OutputFormats"=hex:01,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
-
-[HKEY_CURRENT_USER\\Software\\LAV\\Audio\\Formats]
-"wma"=dword:00000001
-"wmapro"=dword:00000001
-"wmalossless"=dword:00000001
-EOF
-    cmp -s "$reg" "$reg_old" && return
-    echo "Applying video registry settings..."
-    # Both registry views (32-bit game, but some keys are shared/redirected)
-    wine 'C:\windows\syswow64\regedit.exe' /S 'C:\cmr04-videos.reg'
-    wineserver -w
-    wine regedit /S 'C:\cmr04-videos.reg'
-    wineserver -w
-    cp "$reg" "$reg_old"
 }
 
 run_game() {
@@ -351,7 +342,5 @@ start_boot_log "$NW $NH 0 0" "$GAME_EXE"
 set_governor
 sound_mixer_start cmr04   # (shared code; SOUND_MIXER)
 setup_prefix
-setup_videos
-setup_video_registry
 run_game
 exit 0

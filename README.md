@@ -114,7 +114,8 @@ The versions, patches and extras used for each game in my setup, so you can set 
 
 ### Half-Life
 - Retail WON version (not Steam). Runs in OpenGL; Direct3D is never used, because GoldSrc's Direct3D path hangs the display.
-- **CD key (optional):** put your CD key on the first line of `hl-cdkey.txt` in the game folder, with or without the dashes. It's written into the registry on every launch, so a new Wine prefix doesn't ask for it. Without the file, the game asks for the key as normal.
+- Sound goes through a game-only ALSA mixer (`SOUND_MIXER=2`), so no sound loses its start while the TV's HDMI audio wakes up.
+- **CD key (optional):** put your CD key on the first line of `hl-cdkey.txt` in the game folder, with or without the dashes. It's imported into the registry once (and again if you change it), so a new Wine prefix doesn't ask for it. Without the file, the game asks for the key as normal.
 
 ### Jazz Jackrabbit 2
 - **Jazz Jackrabbit 2 v1.20** full version, with the official **v1.23** patch.
@@ -344,6 +345,7 @@ git apply -p0 /path/to/nfs2se-texture-fix.patch
 ## Requirements
 
 - **Raspberry Pi 5** with **RetroPie** on **Raspberry Pi OS Bookworm Lite 64-bit**.
+- **The Pi set to output 1080p (1920x1080), not 4K.** These scripts are designed to run at 1080p: every script assumes it (`NATIVE_RES="1920x1080"`), sets the TV to that mode for each game, and scales the picture to fit it.
 - **Box64, Wine and their dependencies**, installed with the RetroPie-Setup modules from [Box64-Wine-Install](https://github.com/CARRisma1978/Box64-Wine-Install):
   - `wine-deps`, `box64` and `wine` for every game. Use **Wine 11.18** - later versions don't currently work (see that repo's README).
   - `fluidsynth` for games with MIDI music (3D Pinball, DX-Ball, Lemmings).
@@ -367,7 +369,7 @@ git apply -p0 /path/to/nfs2se-texture-fix.patch
 1. Copy the `.sh` scripts and the `.scripts` folder into `~/RetroPie/roms/windows/`. The `.scripts` folder must sit next to the scripts.
 2. Install each game into its folder under `~/RetroPie/roms/windows/` (see the table above), with any fixes it needs.
 3. Run the patches from [`game-fixes`](#the-game-fixes-folder) for the games that need them: Jazz Jackrabbit 2, Need for Speed: Underground 2, OutRun 2006 and Serious Sam (and optionally NFS II SE). The `game-fixes` folder itself doesn't need to be on the Pi.
-4. Check the settings at the top of each script, especially `NATIVE_RES` (your TV's resolution).
+4. Check the settings at the top of each script. `NATIVE_RES` is `1920x1080` in every script; if your Pi runs at a different resolution, change it in all of them.
 5. Add the games to EmulationStation's `gamelist.xml` for the Windows system, or restart EmulationStation.
 
 If you edit the scripts on Windows, save them with **Unix (LF)** line endings. In Notepad++: *Edit → EOL Conversion → Unix (LF)*. Scripts with Windows (CRLF) line endings fail on the Pi.
