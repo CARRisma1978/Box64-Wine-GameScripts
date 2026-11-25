@@ -205,9 +205,9 @@ in_x() {
     sound_mixer_start "$GAME_ID"
     cd "$GAME_DIR" || exit 1
     log_settings DESK_RES GAME_VSYNC KEEP_ASPECT
-    # Back when the game has closed and all of Wine has finished
-    wine explorer /desktop="$GAME_ID","$DESK_RES" "$GAME_EXE"
-    wineserver -w
+    wine explorer /desktop="$GAME_ID","$DESK_RES" "$GAME_EXE" &
+    # Back as soon as Wine has finished after the game closes (shared code)
+    wait_for_game $! "$GAME_EXE"
 }
 
 # ===================== Main =====================

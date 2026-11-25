@@ -240,17 +240,9 @@ in_x() {
     setup_prefix
     setup_done              # (the start-up messages time the game from here)
     sound_mixer_start "$GAME_ID"
-    # Music: FluidSynth must be running before Wine starts (the loop into it
-    # starts with the game's window - follow_window_hook)
-    if [ "$MUSIC" = "1" ]; then
-        if [ "$SOUND_MIXER" != "0" ]; then
-            echo "WARNING: music needs the ALSA mixer (SOUND_MIXER=0) - no music"
-            MUSIC=0
-        elif ! fluidsynth_start "$GAME_ID"; then
-            MUSIC=0
-        fi
-    fi
-    if [ "$MUSIC" = "1" ]; then
+    # Music: FluidSynth before Wine starts (shared code); the loop into it
+    # starts with the game's window - follow_window_hook
+    if music_start; then
         # The music loop is started by the window follower (a background
         # helper), so it's added to the shared cleanup here
         cleanup_add "$GAME_ID-music"

@@ -121,7 +121,7 @@ setup_prefix() {
     local reg_old="$WINEPREFIX/$GAME_ID-settings.applied"
     { wine_base_reg; cat <<EOF
 ; Every program in this prefix runs in the Wine desktop "$GAME_ID"
-; (GAME_RES), which the script starts first
+; (GAME_RES), which Wine starts itself
 [HKEY_CURRENT_USER\\Software\\Wine\\Explorer]
 "Desktop"="$GAME_ID"
 
@@ -145,23 +145,14 @@ in_x() {
     sound_mixer_start "$GAME_ID"
     cd "$GAME_DIR" || exit 1
     log_settings
-    # The Wine desktop first, started by the script (Box64 0.4.5 of
-    # 2026-10-23: the desktop Wine starts on its own for "wine start" hung -
-    # no window, back to ES). Then Solitaire into it, maximised: start.exe
-    # straight from the shell (not via explorer), so Wine opens no console
-    # window for it.
-    wine explorer /desktop="$GAME_ID","$GAME_RES" &
-    local desk_pid=$! i
-    for (( i = 0; i < 60; i++ )); do               # its window: at most 30 s
-        xwininfo -root -tree 2>/dev/null | grep -qiE 'wine desktop|\("explorer\.exe"' && break
-        kill -0 "$desk_pid" 2>/dev/null || break
-        sleep 0.5
-    done
-    wine start /max "$GAME_EXE"
-    # The desktop stays open after the game, so Wine never finishes by
-    # itself: back 2 seconds after Solitaire closes (shared code; the shared
-    # cleanup then ends it)
-    WINE_EXIT_WAIT=2 wait_for_game "$desk_pid" "$GAME_EXE"
+    # Solitaire, maximised, in the Wine desktop "$GAME_ID" (GAME_RES - Wine
+    # starts it itself, from the registry above). start.exe straight from
+    # the shell (not via explorer), so Wine opens no console window for it;
+    # /wait: start.exe ends when Solitaire does.
+    wine start /wait /max "$GAME_EXE" &
+    # Back as soon as Solitaire has closed (shared code; the desktop stays
+    # open after it, and the shared cleanup then ends it)
+    wait_for_game $! "$GAME_EXE"
 }
 
 # ===================== Main =====================

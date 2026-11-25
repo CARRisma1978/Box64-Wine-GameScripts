@@ -290,8 +290,8 @@ def press_ok(w):
     xtst.XTestFakeKeyEvent(dpy, k, 0, 0)
     x11.XFlush(dpy)
 
-# Maximise the main window: double-click its title bar
-def maximise_window(w, h, x, y):
+# Maximise the main window (w wide, at x,y): double-click its title bar
+def maximise_window(w, x, y):
     x11.XWarpPointer(dpy, 0, root, 0, 0, 0, 0, x + w // 2, y + 12)
     x11.XFlush(dpy)
     time.sleep(0.2)
@@ -330,29 +330,21 @@ while True:
         if not max_done:
             max_done = True
             if main[0] < cw - 16:            # narrower than the screen
-                maximise_window(*main)
+                maximise_window(main[0], main[2], main[3])
 EOF
 }
 
 # Inside X (from launch, shared code)
 in_x() {
-    xsetroot -solid black 2>/dev/null
-    # The whole screen until the game shows (shared code; no zoom: no
-    # follower either)
+    # The whole X screen shown until the game's window appears (shared code)
     zoom_start "" "$CANVAS_W" "$CANVAS_H"
+    xsetroot -solid black 2>/dev/null
     start_boot_log "$START_GEO" "$GAME_EXE"
     set_governor
     setup_prefix
     setup_done              # (the start-up messages time the game from here)
     sound_mixer_start "$GAME_ID"
-    # Music: FluidSynth must be running before Wine starts, so the game finds it
-    if [ "$MUSIC" = "1" ]; then
-        if [ "$SOUND_MIXER" = "0" ]; then
-            fluidsynth_start "$GAME_ID"
-        else
-            echo "WARNING: music needs the ALSA mixer (SOUND_MIXER=0) - no music"
-        fi
-    fi
+    music_start             # (MUSIC: FluidSynth, before Wine - shared code)
     cd "$GAME_DIR" || exit 1
     log_settings MAXIMISE MUSIC
     # The game's main window, followed (shared code - see Display above)
@@ -363,7 +355,9 @@ in_x() {
     else
         echo "WARNING: python3 not found - start-up warning not closed, window not maximised"
     fi
-    wine "$GAME_EXE"
+    wine "$GAME_EXE" &
+    # Back as soon as Wine has finished after the game closes (shared code)
+    wait_for_game $! "$GAME_EXE"
 }
 
 # ===================== Main =====================

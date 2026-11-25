@@ -168,10 +168,11 @@ in_x() {
     cd "$GAME_DIR" || exit 1
     log_settings
     follow_start watch_game_window
-    # Wine desktop the size of the TV - deliberately bigger than the game.
-    # Back when the launcher has closed and all of Wine has finished.
-    wine explorer /desktop="$GAME_ID","$NATIVE_RES" "$LAUNCH_EXE"
-    wineserver -w
+    # Wine desktop the size of the TV - deliberately bigger than the game
+    wine explorer /desktop="$GAME_ID","$NATIVE_RES" "$LAUNCH_EXE" &
+    # Back as soon as Wine has finished after the launcher and the game have
+    # closed (shared code; either one counts as the game running)
+    wait_for_game $! "$LAUNCH_EXE" "$GAME_EXE"
 }
 
 # ===================== Main =====================

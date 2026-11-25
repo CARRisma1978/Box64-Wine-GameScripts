@@ -17,10 +17,10 @@ This release is an overhaul of all the Wine game scripts (`nfs3.sh`, which runs 
 - **A shared settings file, `.scripts/settings.cfg`:** the Wine and Box64 paths, the TV's resolution and scaling, the HDMI port, the MIDI soundfont and the start-up message size, set once for all games. A game's script can still set any of them for itself.
 - **Sharing Wine's files between games (optional):** every prefix holds about 600 MB of Wine files, nearly all identical. With sharing on, the identical files become hard links to one master copy (`~/wine-prefixes/.master`), saving about 16 GB across the 29 games on my Pi. Anything a game changes or adds stays its own. Sharing is turned on or off in the `wine` module's menu in RetroPie-Setup ([Box64-Wine-Install](https://github.com/CARRisma1978/Box64-Wine-Install)), which also has "Share now". A game can opt out with `PREFIX_LINK=0` in its script.
 - **The same sound mixer numbers in every game:** `SOUND_MIXER=0` is a game-only ALSA mixer (now used by every game with sound), `1` is straight to the HDMI sound, `2` is a private PulseAudio.
-- **The same start-up in every game:** everything is set up inside the game's own X session, and the start-up messages show each setup step and how long it took (only when there's real work to do, e.g. on a first run). A game started with no Wine prefix at all sets itself up from scratch, with no manual steps.
+- **The same start-up and close-down in every game:** everything is set up inside the game's own X session, and the start-up messages show each setup step and how long it took (only when there's real work to do, e.g. on a first run). A game started with no Wine prefix at all sets itself up from scratch, with no manual steps. Every game is then watched the same way until it closes, and if Wine hangs on after the game has closed, it's ended after a few seconds so you're taken back to EmulationStation.
 - **The same log in every game:** in the game's folder, named after the game (e.g. `td6-launch.log`), with one line at the top listing the settings used.
 - **Test and diagnostic switches removed:** settings that only existed for trying things out are now fixed at the values that work, and the start-up messages are always shown.
-- **Small fixes found along the way**, e.g. Test Drive 6's mouse pointer now starts in view on its launcher, and Lemmings' drop-down menus no longer make the pointer jump.
+- **Small fixes found along the way**, e.g. Test Drive 6's mouse pointer now starts in view on its launcher, Lemmings' drop-down menus no longer make the pointer jump, and Solitaire no longer needs a workaround for a start-up hang in an older Box64 build.
 
 **Upgrading from the earlier scripts:** replace all the `.sh` scripts and the whole `.scripts` folder (including the new `settings.cfg`). On its first launch, a game may import its registry settings again once. Some files left in the game folders and prefixes by the earlier scripts (older log and settings file names) are no longer used; they're harmless and can be deleted.
 
@@ -53,7 +53,7 @@ Shared code and settings, loaded by every game script. The files are named `.inc
 | `settings.cfg` | The settings shared by all the games: Wine and Box64 paths, the TV's resolution and scaling, HDMI port, soundfont, start-up message size |
 | `common.inc` | Loading `settings.cfg`, starting each game (X, file checks, setup, cleanup), Box64 and Wine settings, prefix setup and sharing, logging, `--kill` |
 | `display.inc` | Scaling and zooming the picture to the TV, the starting zoom, following the game's window, black panels, mouse fence, keyboard focus |
-| `sound.inc` | The private sound mixers (PulseAudio or ALSA) and FluidSynth |
+| `sound.inc` | The private sound mixers (ALSA or PulseAudio), and MIDI music through FluidSynth |
 | `bootlog.inc` / `bootlog.py` | The start-up messages and black cover while the game loads |
 | `panels.py` | Black panels beside the picture, and the mouse fence |
 | `focus.py` | Keeps the keyboard focus on the game |

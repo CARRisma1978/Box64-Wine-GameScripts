@@ -129,14 +129,7 @@ in_x() {
     setup_prefix
     setup_done              # (the start-up messages time the game from here)
     sound_mixer_start "$GAME_ID"
-    # Music: FluidSynth must be running before Wine starts, so the game finds it
-    if [ "$MUSIC" = "1" ]; then
-        if [ "$SOUND_MIXER" = "0" ]; then
-            fluidsynth_start "$GAME_ID"
-        else
-            echo "WARNING: music needs the ALSA mixer (SOUND_MIXER=0) - no music"
-        fi
-    fi
+    music_start             # (MUSIC: FluidSynth, before Wine - shared code)
     cd "$GAME_DIR" || exit 1
     log_settings SCALE_MODE MUSIC
     wine explorer /desktop="$GAME_ID","$GAME_RES" "$GAME_EXE" &

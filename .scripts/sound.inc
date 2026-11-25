@@ -9,11 +9,13 @@
 #  keep using plain ALSA. Settings read from the game's script:
 #    SOUND_MIXER    sound_mixer_start: 0 = the ALSA mixer, 1 = none (plain
 #                   ALSA), 2 = PulseAudio
+#    MUSIC          music_start: 1 = the game's MIDI music through FluidSynth
+#                   (MIDI_GAIN = its volume)
 #  and from settings.cfg (a game's script can set its own):
 #    HDMI_CARD      vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
 #    PA_LATENCY_MS  PulseAudio mixer: sound buffered between the game and
 #                   PulseAudio ("" = PulseAudio's default)
-#    SOUNDFONT      FluidSynth's sounds (MIDI_GAIN, its volume: the game's)
+#    SOUNDFONT      FluidSynth's sounds
 #    DEBUG=1        alsaloop's messages into the log
 # =============================================================================
 
@@ -238,6 +240,21 @@ fluidsynth_stop() {
     [ -n "$FLUID_PID" ] && kill "$FLUID_PID" 2>/dev/null && wait "$FLUID_PID" 2>/dev/null
     FLUID_PID=""
     return 0
+}
+
+# music_start
+#   The game's MIDI music (its MUSIC setting): with MUSIC=1, starts
+#   FluidSynth (fluidsynth_start, port named GAME_ID) - before Wine starts,
+#   so the game finds it. Needs the ALSA mixer (SOUND_MIXER=0) to mix it
+#   with the game's sounds. No music (not wanted, wrong mixer, or FluidSynth
+#   didn't start): MUSIC is set to 0, so the log shows it, and false.
+music_start() {
+    [ "$MUSIC" = "1" ] || { MUSIC=0; return 1; }
+    if [ "$SOUND_MIXER" != "0" ]; then
+        echo "WARNING: music needs the ALSA mixer (SOUND_MIXER=0) - no music"
+        MUSIC=0; return 1
+    fi
+    fluidsynth_start "$GAME_ID" || { MUSIC=0; return 1; }
 }
 
 # ----- The game's sound mixer (its SOUND_MIXER setting) -----------------------
