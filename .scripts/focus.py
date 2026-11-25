@@ -46,7 +46,7 @@ x11.XFree.argtypes = [P]
 x11.XFlush.argtypes = [P]
 x11.XSync.argtypes = [P, c.c_int]
 HANDLER = c.CFUNCTYPE(c.c_int, P, P)
-ignore = HANDLER(lambda d, e: 0)          # windows can vanish mid-query - ignore
+ignore = HANDLER(lambda d, e: 0)          # windows can vanish mid-query
 x11.XSetErrorHandler(ignore)
 
 dpy = x11.XOpenDisplay(None)
@@ -87,7 +87,7 @@ while True:
     time.sleep(1)
     f, rev = W(), c.c_int()
     x11.XGetInputFocus(dpy, c.byref(f), c.byref(rev))
-    if f.value not in (0, 1, root):          # None, PointerRoot, the root: nobody
+    if f.value not in (0, 1, root):          # None/PointerRoot/root: nobody
         continue
     found = sorted(candidates())
     if not found:

@@ -8,7 +8,7 @@
 #  Note: the original v1.00 CD's exe has SafeDisc (a disc check), which
 #  doesn't run under Wine - a v1.05 exe that runs without the disc works.
 #
-#  How it works (based on quake2.sh / outrun.sh):
+#  How it works:
 #   - OpenGL -> Wine's opengl32 -> Mesa on the Pi's GPU (no wined3d, so no
 #     GL 3.3 override needed). The game's Direct3D option is never used.
 #   - The game's options are kept in Scripts\PersistentSymbols.ini (the game
@@ -38,7 +38,6 @@
 #     message; nothing else uses it. (Interpreter, BIGBLOCK=0, CALLRET=0,
 #     STRONGMEM=1 - all tested, none help.) The script warns in the log if
 #     the original Engine.dll is in place.
-#   - Prefix setup runs BEFORE X starts, with Wine fully stopped afterwards.
 #
 #  To close a stuck game over SSH:
 #      bash ~/RetroPie/roms/windows/SeriousSam.sh --kill
@@ -50,19 +49,15 @@
 # =============================================================================
 
 # ===================== Settings =====================
-GAME_DIR="$HOME/RetroPie/roms/windows/Serious Sam"  # \\<pi>\roms\windows\Serious Sam
-GAME_SUBDIR="Bin"           # where the exe is (the game is started from there)
-GAME_EXE="SeriousSam.exe"   # exactly as spelled on disk (Box64 settings match it)
-
-WINE_DIR="$HOME/wine-wow64/wine/bin"
-WINE_BIN="$WINE_DIR/wine"
-WINESERVER_BIN="$WINE_DIR/wineserver"
-BOX64_BIN="$(command -v box64 || echo /usr/local/bin/box64)"
-
-export WINEPREFIX="$HOME/wine-prefixes/serioussam"
-LOG_FILE="$GAME_DIR/serioussam-launch.log"
+GAME_ID="serioussam"        # short name: its Wine prefix
+                            #   (~/wine-prefixes/serioussam) and log
+# \\<pi>\roms\windows\Serious Sam
+GAME_DIR="$HOME/RetroPie/roms/windows/Serious Sam"
+GAME_EXE="SeriousSam.exe"   # exactly as spelled on disk
+GAME_EXE_DIR="Bin"          # where the exe is (the game is started from there)
 
 # ----- Display ----------------------------------------------------------------
+# The Wine desktop is the TV's size (NATIVE_RES, .scripts/settings.cfg).
 # Pick the resolution in the GAME's Video menu - the zoom follows it and the
 # game remembers it. Only Wine's standard screen sizes work full screen; any
 # other drops to a window (a saved one is replaced by SAFE_RES at the next
@@ -80,12 +75,11 @@ LOG_FILE="$GAME_DIR/serioussam-launch.log"
 # GAME_RES="" = the game's own choice. Or force one at every launch (the
 # game's menu choice is then put back each time), e.g. GAME_RES="1024x768"
 GAME_RES=""
-SAFE_RES="1024x768"         # used when the game's saved size can't be full screen
+SAFE_RES="1024x768"         # used when the game's saved size can't
+                            #   be full screen
 GOOD_RES="640x480 800x600 1024x768 1280x960 1280x720 1280x768 1600x900 1920x1080"
-NATIVE_RES="1920x1080"      # the TV's mode, and the Wine desktop size
-SCALE_FILTER="bilinear"     # bilinear = smooth, nearest = sharp/blocky
-HIDE_CURSOR=1               # 1 = no X pointer (the game draws its own in the
-                            #     menus); 0 = show it
+HIDE_CURSOR=1               # 1 = no mouse pointer, 0 = pointer shown
+                            #   (the game draws its own pointer in the menus)
 MOUSE_FENCE=1               # 1 = the mouse is kept inside the game's picture.
                             #     The game's window sits in the top-left of a
                             #     TV-sized X screen, so without this the
@@ -93,88 +87,83 @@ MOUSE_FENCE=1               # 1 = the mouse is kept inside the game's picture.
                             #     bottom edge onto the black panels, and the
                             #     game's menu cursor sticks there. 0 = off
 
-# ----- Performance / looks (1 = on, 0 = off) ----------------------------------
-FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core (top-left)
-VSYNC=1             # 1 = no tearing (forced in Mesa), 0 = off
-X87DOUBLE=1         # Box64 x87 maths: 0 = lower precision where possible (faster),
-                    #   1 = always double precision (more accurate), 2 = follows the
-                    #   game's own precision setting; empty = Box64's default (0).
-                    #   If movement/physics act oddly with 0, use 1
+# ----- Performance ------------------------------------------------------------
+FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core
+                    #   (top-left; games drawn with OpenGL only)
+VSYNC=2             # 0 = off (smoother below 60 fps, may tear)
+                    # 1 = the game decides (Mesa's default)
+                    # 2 = always on (no tearing)
+X87DOUBLE=1         # Box64 x87 maths: 0 = lower precision where possible
+                    #   (faster), 1 = always double precision (more accurate),
+                    #   2 = follows the game's own precision setting;
+                    #   empty = Box64's default (0)
+                    # If movement/physics act oddly with 0, use 1
 BIGBLOCK=3          # Box64 code block size 0-3 (bigger = less translating);
                     #   empty = Box64's default (2)
 CALLRET=            # Box64 call/ret optimisation (faster): 0 = off, 1 = on,
-                    #   2 = on, also for changed code; empty = Box64's default (2).
-                    #   3 = as 2, plus protection from random crashes (Box64
-                    #   built 26 Oct 2026 or later - check: box64 --version)
-                    #   Can crash some games - try 3, then 0
-STRONGMEM=          # Box64 memory ordering 0-3; empty = Box64's default (0).
-                    #   1 if the game crashes or freezes at random
-DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and loading):
-                    #   empty = on, one cache shared by all games (~/.cache/box64)
-                    #   1 = on, this game's own cache (box64-cache in its prefix)
-                    #   0 = off
-CPU_PERFORMANCE=1   # CPU governor 'performance' while playing (needs passwordless sudo)
-BOOT_LOG=1          # 1 = start-up messages on screen (what Box64 and Wine are
-                    #     loading), then black until the game is ready. Also
-                    #     kept in LOG_FILE. 0 = black screen while starting
-BOOT_LOG_MIN_WINDOW="640x480"   # the game's windows smaller than this don't
-                    #     count for the start-up messages: the game's splash
-                    #     picture (shown while it loads) otherwise ended them
-                    #     early and the TV sat zoomed in on black for a while.
-                    #     Needs the updated .scripts/bootlog.py
+                    #   2 = on, also for changed code (3 = an extra for
+                    #   LoongArch CPUs only, not the Pi); empty = Box64's
+                    #   default (2). Can crash some games - if so, try 0
+DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and
+                    #   loading): empty = on, one cache shared by all games
+                    #   (~/.cache/box64); 1 = on, this game's own cache
+                    #   (box64-cache in its prefix); 0 = off
+CPU_PERFORMANCE=1   # 1 = CPU governor 'performance' while playing
+                    #   (needs passwordless sudo), 0 = left as it is
+RDTSC_1GHZ=1        # 1 = steadier timing on the Pi's slow counter,
+                    #   0 or empty = off (Box64's default)
+                    # (the engine times everything from it - 0 if the game
+                    #   runs at the wrong speed)
+DEBUG=0             # 1 = Wine/Box64 errors and crash details into the log
+                    #   (big log, slower start)
 GLTHREAD=0          # Mesa's GL work on its own thread. The game does all its GL
-                    # on one thread - try 1 if FPS_HUD=2 shows one core at 100%
-RDTSC_1GHZ=1        # 1 = steadier timing on the Pi's slow counter (the engine
-                    #     times everything from it) - 0 if the game runs at
-                    #     the wrong speed
-DEBUG=0             # 1 = Wine errors + Box64 log into LOG_FILE (slower)
+                    #   on one thread - try 1 if FPS_HUD=2 shows one
+                    #   core at 100%
+BOOT_LOG_MIN_WINDOW="640x480"   # the game's windows smaller than this don't
+                    #   count for the start-up messages: the game's splash
+                    #   picture (shown while it loads) otherwise ended them
+                    #   early and the TV sat zoomed in on black for a while
 
-# ----- Sound mixer ------------------------------------------------------------
-# 0 = the game plays straight to the Pi's HDMI sound through ALSA. The HDMI
-#     sound only starts when the game opens it, so the TV may drop the first
-#     moment of sound while it locks on (a short gap just after the start).
-# 1 = a private PulseAudio just for this game that
-#     mixes everything into one stream to the TV. Its HDMI stream runs from
-#     before the game starts - no gap.
-# 2 = the same with ALSA only (as lemmings.sh): dmix -> loopback ->
-#     alsaloop -> HDMI. alsaloop keeps the HDMI stream running from before
-#     the game starts (silence until it plays), so no gap either. Needs
-#     alsa-utils (alsaloop) and the snd-aloop module (loaded by the script).
-# ES and emulators keep using plain ALSA in every case.
-SOUND_MIXER=2
-HDMI_CARD="vc4hdmi0"        # vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
+# ----- Sound ------------------------------------------------------------------
+SOUND_MIXER=0       # 0 = a game-only ALSA mixer: dmix -> loopback ->
+                    #     alsaloop -> HDMI. The HDMI sound stays open for the
+                    #     whole game, so no sound loses its start while the
+                    #     TV's HDMI audio wakes up. Needs alsa-utils
+                    #     (alsaloop) and snd-aloop (loaded by the script)
+                    # 1 = straight to the Pi's HDMI sound through ALSA
+                    # 2 = a private PulseAudio just for this game
+                    # If the chosen mixer can't start: straight to HDMI (1).
+                    # EmulationStation and the emulators always use plain ALSA.
+                    # HDMI port, PulseAudio buffering: .scripts/settings.cfg
 
 # ===================== Shared code =====================
-# In the ".scripts" folder next to this script: common.inc (Box64, the Wine
-# prefix, starting X, waiting for the game to close...), which also loads
-# display.inc (screen scaling and zoom, black panels, mouse fence, keyboard
-# focus, finding the game's window), sound.inc (sound mixers, FluidSynth)
-# and the start-up messages on screen (bootlog.inc, bootlog.py)
+# In the ".scripts" folder next to this script: common.inc (settings.cfg,
+# Box64, the Wine prefix, starting X, waiting for the game to close...),
+# which also loads display.inc (screen scaling and zoom, black panels, mouse
+# fence, keyboard focus, finding the game's window), sound.inc (sound
+# mixers, FluidSynth) and the start-up messages on screen (bootlog.inc,
+# bootlog.py)
 COMMON_INC="$(dirname "$(readlink -f "$0")")/.scripts/common.inc"
 if [ ! -f "$COMMON_INC" ]; then
-    echo "ERROR: $COMMON_INC not found" | tee -a "$LOG_FILE"
+    echo "ERROR: $COMMON_INC not found" | tee "${LOG_FILE:-$GAME_DIR/$GAME_ID-launch.log}"
     sleep 5; exit 1
 fi
 # shellcheck source=/dev/null
 . "$COMMON_INC"
 
 # ===================== Environment =====================
-
-# The 2001 engine overflows a buffer on long GL extension strings - only report old ones
+# The 2001 engine overflows a buffer on long GL extension strings - only
+# report old ones
 export MESA_EXTENSION_MAX_YEAR=2002
-export MESA_NO_ERROR=1                         # skip GL error checking
-[ "$VSYNC" = "1" ] && export vblank_mode=3 || export vblank_mode=0   # 3 = always sync
-[ "$GLTHREAD" = "1" ] && export mesa_glthread=true || export mesa_glthread=false
+# OpenGL: no error checking, GLTHREAD - shared code
+gl_setup
 
-# Wine's and Box64's messages (DEBUG, BOOT_LOG, RDTSC_1GHZ) - shared code
+# Wine's and Box64's messages (DEBUG, RDTSC_1GHZ) - shared code
 wine_logging
-export BOOT_LOG_MIN_WINDOW                     # (read by bootlog.py)
 
 # Box64's settings file (4 cores, speed settings for the game),
 # DYNACACHE, FPS_HUD - shared code
 box64_setup "$GAME_EXE"
-
-NW=${NATIVE_RES%x*}; NH=${NATIVE_RES#*x}
 
 # The game's options file (Scripts\PersistentSymbols.ini, any case)
 GAME_INI="$(find "$GAME_DIR" -maxdepth 2 -ipath '*/scripts/persistentsymbols.ini' 2>/dev/null | head -n1)"
@@ -206,9 +195,9 @@ GW=${START_RES%x*}; GH=${START_RES#*x}
 # The script's settings into Scripts\PersistentSymbols.ini (no Wine needed):
 #   sam_iScreenSizeI, sam_iScreenSizeJ = the start resolution - only when
 #                              forced (GAME_RES) or replacing a bad/missing one
-#   sam_bFullScreenActive = 1  full screen (inside the Wine desktop - zoomed as usual)
+#   sam_bFullScreenActive = 1  full screen (in the Wine desktop, zoomed)
 #   sam_iGfxAPI           = 0  OpenGL (1 = Direct3D: slower through wined3d)
-#   snd_iInterface        = 1  DirectSound (0 = WaveOut, 2 = EAX - none under Wine)
+#   snd_iInterface        = 1  DirectSound (0 = WaveOut, 2 = EAX: none in Wine)
 # Only these lines are changed; everything else in the file is kept, as are
 # its line endings. Missing lines are added, written the way the game
 # writes its own:  persistent extern user INDEX name=(INDEX)value;
@@ -244,7 +233,7 @@ set_game_ini() {
 # 75 = original) - a warning in the log if not
 check_engine_patch() {
     local dll b
-    dll="$(find "$GAME_DIR/$GAME_SUBDIR" -maxdepth 1 -iname 'engine.dll' 2>/dev/null | head -n1)"
+    dll="$(find "$GAME_DIR/$GAME_EXE_DIR" -maxdepth 1 -iname 'engine.dll' 2>/dev/null | head -n1)"
     b="$(od -An -tx1 -j $((0x1D577)) -N1 "$dll" 2>/dev/null | tr -d ' ')"
     case "$b" in
         eb) echo "Engine.dll: patched" ;;
@@ -253,50 +242,23 @@ check_engine_patch() {
     esac
 }
 
-# Runs before X, with Wine fully stopped afterwards
+# The prefix (shared code), then the registry - imported only when it
+# changes (each import is a full Box64 + Wine start-up) - then the game's
+# own settings
 setup_prefix() {
-    prefix_setup serioussam     # (+ finishes a pending update after a new Wine)
-
-    # All settings in ONE import, only when something changed (each import
-    # is a full Box64 + Wine start-up)
-    local reg_new="$WINEPREFIX/drive_c/serioussam-settings.reg" reg_old="$WINEPREFIX/serioussam-settings.applied"
-    cat > "$reg_new" <<EOF
-REGEDIT4
-
-; Wine mustn't change the TV's screen mode, or react to the GPU zoom
-[HKEY_CURRENT_USER\\Software\\Wine\\X11 Driver]
-"UseXRandR"="N"
-"UseXVidMode"="N"
-
-; Black Wine desktop (beside the zoomed game)
-[HKEY_CURRENT_USER\\Control Panel\\Colors]
-"Background"="0 0 0"
-
-; Software-mixed DirectSound (fixed hangs in mk4, quake2 and nfs6)
-[HKEY_CURRENT_USER\\Software\\Wine\\DirectSound]
-"HardwareAcceleration"="Emulation"
-
-; Wine's sound output: PulseAudio (the private mixer) or ALSA - named, so
-; Wine doesn't try PulseAudio first when it isn't running
-[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]
-$([ "$SOUND_MIXER" = "1" ] && echo '"Audio"="pulse"' || echo '"Audio"="alsa"')
-
+    prefix_setup
+    local reg_new="$WINEPREFIX/drive_c/$GAME_ID-settings.reg"
+    local reg_old="$WINEPREFIX/$GAME_ID-settings.applied"
+    { wine_base_reg dsound; cat <<EOF
 ; Serious Sam is a 2001 game - report Windows XP to it
 [HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\$GAME_EXE]
 "Version"="winxp"
 EOF
+    } > "$reg_new"
     import_reg "$reg_new" "$reg_old"
 
     check_engine_patch
     set_game_ini
-
-    # The start-up messages' timing learned before BOOT_LOG_MIN_WINDOW (from
-    # the splash picture) - forgotten once, so it's learned again
-    if [ ! -e "$WINEPREFIX/.boot_log_min_window" ]; then
-        rm -f "$WINEPREFIX/.boot_log_time"
-        : > "$WINEPREFIX/.boot_log_min_window"
-        echo "Start-up messages: old timing forgotten (learned again this launch)"
-    fi
 }
 
 # Zooming (zoom_to), the black panels beside the game (panels_start) and
@@ -304,79 +266,36 @@ EOF
 # TV's size; only a window the TV's full size is shown 1:1.
 ZOOM_FB="$NATIVE_RES"
 
-run_game() {
-    cd "$GAME_DIR/$GAME_SUBDIR" || exit 1
-    echo "=== $(date) === RES=$START_RES ($RES_SOURCE) VSYNC=$VSYNC GLTHREAD=$GLTHREAD STRONGMEM=$STRONGMEM BIGBLOCK=$BIGBLOCK X87DOUBLE=$X87DOUBLE CALLRET=$CALLRET DYNACACHE=$DYNACACHE RDTSC_1GHZ=$RDTSC_1GHZ MOUSE_FENCE=$MOUSE_FENCE SOUND_MIXER=$SOUND_MIXER"
-    if [ -n "$OUTPUT" ] && command -v xwininfo >/dev/null; then
-        FOLLOW_PANELS=serioussam-panels FOLLOW_FENCE="$MOUSE_FENCE" FOLLOW_HOLD_FULL=1 \
-            follow_window 640 480 &      # (smaller = the start-up splash picture)
-        WATCH_PID=$!
-    else
-        echo "WARNING: no display or xwininfo (sudo apt install x11-utils) - no zoom"
-    fi
+# Inside X (from launch, shared code)
+in_x() {
+    # A fixed "monitor" the TV's full size (Wine checks screen modes against
+    # the monitor X reports, which otherwise follows the zoom - the game's
+    # resolution could then be refused), then straight to the game's
+    # resolution, in the top-left corner where Wine puts the game. The
+    # helper takes over from there. (shared code)
+    zoom_start "$NATIVE_RES" "$GW" "$GH"
+    xsetroot -solid black 2>/dev/null
+    # shellcheck disable=SC2153   # (START_GEO is set by zoom_start)
+    start_boot_log "$START_GEO" "$GAME_EXE"     # (the area the TV shows
+                                                #   from the start)
+    set_governor
+    setup_prefix
+    setup_done              # (the start-up messages time the game from here)
+    # Keyboard to the game: with no window manager, X sends key presses to
+    # whatever is under the (hidden) pointer, which can miss the game. The
+    # keeper gives the focus to Wine's desktop whenever nothing has it
+    # (shared code; stopped by the shared cleanup).
+    focus_start explorer.exe "$GAME_EXE"
+    sound_mixer_start "$GAME_ID"
+    cd "$GAME_DIR/$GAME_EXE_DIR" || exit 1
+    log_settings RES="$START_RES ($RES_SOURCE)"
+    FOLLOW_FENCE="$MOUSE_FENCE" FOLLOW_HOLD_FULL=1 \
+        follow_start 640 480    # (smaller = the start-up splash picture)
     # Wine desktop the size of the TV: the game can't change the real mode
-    wine explorer /desktop=serioussam,"$NATIVE_RES" "$GAME_EXE" &
+    wine explorer /desktop="$GAME_ID","$NATIVE_RES" "$GAME_EXE" &
     # Back as soon as Wine has finished after the game closes (shared code)
     wait_for_game $! "$GAME_EXE"
 }
 
-cleanup() {
-    stop_boot_log
-    [ -n "$WATCH_PID" ] && kill "$WATCH_PID" 2>/dev/null
-    panels_stop
-    focus_stop
-    wineserver -k 2>/dev/null
-    sound_mixer_stop
-    restore_governor
-}
-
 # ===================== Main =====================
-if [ "$1" = "--kill" ]; then
-    kill_game                       # (shared code)
-    exit 0
-fi
-
-if [ "$1" != "--in-x" ]; then
-    # From EmulationStation: prefix setup first (no X needed), then X just
-    # for the game, on ES's console, so it exits cleanly back to ES
-    check_files "$GAME_DIR/$GAME_SUBDIR/$GAME_EXE"
-    : > "$LOG_FILE"
-    setup_prefix >> "$LOG_FILE" 2>&1
-    NOCURSOR=""; [ "$HIDE_CURSOR" = "1" ] && NOCURSOR="-nocursor"
-    # shellcheck disable=SC2086
-    start_x -quiet $NOCURSOR
-    wineserver -k 2>/dev/null       # make sure nothing is left running
-    exit 0
-fi
-
-# ----- Inside X -----
-exec >> "$LOG_FILE" 2>&1
-trap cleanup EXIT INT TERM
-xset s off -dpms s noblank 2>/dev/null   # gamepad input doesn't reset blanking
-display_output "no zoom"
-# A fixed "monitor" the TV's full size. Wine checks screen modes against
-# the monitor X reports, which otherwise follows the zoom - the game's
-# resolution could then be refused (as found with NFSU).
-if [ -n "$OUTPUT" ]; then
-    fixed_monitor serioussam-tv "$NATIVE_RES" \
-        || echo "WARNING: could not set a fixed monitor - the resolution may be refused"
-fi
-# Start at the game's resolution straight away (black to black: nothing is
-# drawn yet), in the top-left corner where Wine puts the game. Safe this
-# early because of the fixed monitor above - the zoom can't change what Wine
-# measures. The helper takes over from here.
-START_GEO="$GW $GH 0 0"
-echo "Starting zoom: $START_GEO"
-# shellcheck disable=SC2086
-zoom_to $START_GEO
-xsetroot -solid black 2>/dev/null
-start_boot_log "$START_GEO" "$GAME_EXE"     # (the area the TV shows from the start)
-# Keyboard to the game: with no window manager, X sends key presses to
-# whatever is under the (hidden) pointer, which can miss the game. The
-# keeper gives the focus to Wine's desktop whenever nothing has it (shared
-# code).
-focus_start explorer.exe "$GAME_EXE"
-set_governor
-sound_mixer_start serioussam   # (shared code; SOUND_MIXER)
-run_game
-exit 0
+launch "$@"                 # (shared code: --kill, X, then in_x)

@@ -7,15 +7,17 @@
 #  and to keep the TV's HDMI sound open for the whole game, so no sound
 #  loses its start while it wakes up. EmulationStation and the emulators
 #  keep using plain ALSA. Settings read from the game's script:
-#    SOUND_MIXER    sound_mixer_start: 0 = none, 1 = PulseAudio, 2 = ALSA
+#    SOUND_MIXER    sound_mixer_start: 0 = the ALSA mixer, 1 = none (plain
+#                   ALSA), 2 = PulseAudio
+#  and from settings.cfg (a game's script can set its own):
 #    HDMI_CARD      vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
 #    PA_LATENCY_MS  PulseAudio mixer: sound buffered between the game and
 #                   PulseAudio ("" = PulseAudio's default)
-#    SOUNDFONT, MIDI_GAIN   FluidSynth
+#    SOUNDFONT      FluidSynth's sounds (MIDI_GAIN, its volume: the game's)
 #    DEBUG=1        alsaloop's messages into the log
 # =============================================================================
 
-# ----- PulseAudio mixer --------------------------------------------------------
+# ----- PulseAudio mixer -------------------------------------------------------
 # pulse_mixer_start name
 #   A private PulseAudio (files in the prefix's "pulse" folder), playing to
 #   HDMI_CARD, used by everything started after this (Wine needs
@@ -78,8 +80,9 @@ pulse_mixer_stop() {
     return 0
 }
 
-# ----- ALSA mixer --------------------------------------------------------------
-#  Game (+ FluidSynth) -> plug -> dmix -> Loopback (snd-aloop) -> alsaloop -> HDMI
+# ----- ALSA mixer -------------------------------------------------------------
+#  Game (+ FluidSynth) -> plug -> dmix -> Loopback (snd-aloop) -> alsaloop
+#    -> HDMI
 #  dmix can't write to the Pi's HDMI device directly (it only takes the
 #  IEC958 format), so the mix goes through a loopback device, and alsaloop
 #  keeps one stream open to the TV for the whole game.
@@ -127,7 +130,8 @@ alsa_mixer_start() {
         ALOOP_LOADED=1
         sleep 1
     fi
-    pkill -u "$(id -u)" -x alsaloop 2>/dev/null && sleep 0.2     # leftover from a crash
+    # leftover from a crash
+    pkill -u "$(id -u)" -x alsaloop 2>/dev/null && sleep 0.2
     ALSA_MIXER_KEY="$key"
     alsa_dmix_clear "$key"
     local conf="$WINEPREFIX/$name-asound.conf" main="$WINEPREFIX/$name-alsa.conf"
@@ -161,7 +165,8 @@ EOF
     # Only what's started after this uses it.
     awk '/^@hooks \[/ {s = 1} !s {print} s && /^\]/ {s = 0}' /usr/share/alsa/alsa.conf > "$main"
     export ALSA_CONFIG_PATH="$main:$conf"
-    # -a off = fixed format (not the loopback's idle 1-channel setting, which HDMI refuses)
+    # -a off = fixed format (not the loopback's idle 1-channel setting, which
+    # HDMI refuses)
     local out=/dev/null; [ "$DEBUG" = "1" ] && out=/dev/stdout
     alsaloop -C hw:Loopback,1,0 -P "${name}_hdmi" -a off -r 48000 -f S16_LE -c 2 -t 100000 \
         >>"$out" 2>&1 &
@@ -179,7 +184,7 @@ alsa_mixer_stop() {
     return 0
 }
 
-# ----- FluidSynth (MIDI music) -------------------------------------------------
+# ----- FluidSynth (MIDI music) ------------------------------------------------
 # fluidsynth_start name
 #   A MIDI synth (SOUNDFONT, MIDI_GAIN) for the game, playing into the
 #   default ALSA device (the ALSA mixer, if started). name = its MIDI port's
@@ -192,7 +197,8 @@ fluidsynth_start() {
     local name="$1" try flog="$WINEPREFIX/fluidsynth.log" i ok
     command -v fluidsynth >/dev/null || { echo "WARNING: fluidsynth not installed - no music"; return 1; }
     [ -f "$SOUNDFONT" ] || { echo "WARNING: soundfont not found: $SOUNDFONT - no music"; return 1; }
-    pkill -u "$(id -u)" -x fluidsynth 2>/dev/null && sleep 0.5     # leftover from a crash
+    # leftover from a crash
+    pkill -u "$(id -u)" -x fluidsynth 2>/dev/null && sleep 0.5
     for try in 1 2; do
         : > "$flog"
         fluidsynth -a alsa -m alsa_seq -o midi.alsa_seq.id="$name" \
@@ -234,27 +240,27 @@ fluidsynth_stop() {
     return 0
 }
 
-# ----- The game's sound mixer (its SOUND_MIXER setting) -------------------------
+# ----- The game's sound mixer (its SOUND_MIXER setting) -----------------------
 # sound_mixer_start name [note]
 #   Starts the mixer the game's SOUND_MIXER asks for:
-#     0 = none - Wine plays straight to the TV through ALSA
-#     1 = a private PulseAudio (pulse_mixer_start; Wine needs "Audio"="pulse")
-#     2 = the ALSA mixer (alsa_mixer_start)
+#     0 = the ALSA mixer (alsa_mixer_start)
+#     1 = none - Wine plays straight to the TV through ALSA
+#     2 = a private PulseAudio (pulse_mixer_start; Wine needs "Audio"="pulse")
 #   name = a short name for its files. Exports PULSE_SERVER /
 #   ALSA_CONFIG_PATH: Wine started after this plays into the mix. If it
 #   can't start: a warning (+ note, e.g. "no sound in this game without
-#   it"), SOUND_MIXER=0 and false.
+#   it"), SOUND_MIXER=1 and false.
 sound_mixer_start() {
     local name="$1" note="${2:+ - $2}"
     case "$SOUND_MIXER" in
-        1) pulse_mixer_start "$name" && return 0
-           echo "WARNING: PulseAudio sound mixer didn't start$note" ;;
-        2) alsa_mixer_start "$name" && return 0
+        0) alsa_mixer_start "$name" && return 0
            echo "WARNING: ALSA sound mixer didn't start - plain ALSA instead$note" ;;
+        2) pulse_mixer_start "$name" && return 0
+           echo "WARNING: PulseAudio sound mixer didn't start - plain ALSA instead$note" ;;
         *) echo "Sound mixer off (SOUND_MIXER=$SOUND_MIXER) - plain ALSA$note"
            return 0 ;;
     esac
-    SOUND_MIXER=0
+    SOUND_MIXER=1
     return 1
 }
 
@@ -264,7 +270,7 @@ sound_mixer_stop() {
     alsa_mixer_stop
 }
 
-# ----- Clean-up ------------------------------------------------------------------
+# ----- Clean-up ---------------------------------------------------------------
 # sound_kill - ends this user's sound mixers and FluidSynth, however they
 #   were started (for "--kill"; a normal exit uses the _stop functions)
 sound_kill() {

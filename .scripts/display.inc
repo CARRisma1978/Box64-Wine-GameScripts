@@ -14,7 +14,9 @@
 #    ZOOM_FB        zoom_to: smallest X screen size (default NATIVE_RES)
 #    ZOOM_FB_VIEW   zoom_to: 1 = make the X screen reach the whole zoomed
 #                   view, not just the game's area (no window manager:
-#                   xrandr rejects a zoom reaching past the screen's edge)
+#                   xrandr rejects a zoom reaching past the screen's edge).
+#                   The X screen is then made big enough from the first
+#                   zoom for all of ZOOM_FB shown at full TV height
 #    WINDOW_EXE     find_window: the exe whose window to look for
 #                   (default GAME_EXE)
 #    TV_RATE        refresh rate for the TV's mode, e.g. 60 ("" = the TV's
@@ -96,7 +98,8 @@ scale_fixed() {
                              -v ka="${KEEP_ASPECT:-1}" -v al="$align" 'BEGIN {
             split(g, G, "x"); split(n, N, "x")
             if (al == "topleft") {
-                s = G[2] / N[2]; if (G[1] / N[1] < s) s = G[1] / N[1]   # stays inside
+                # stays inside
+                s = G[2] / N[2]; if (G[1] / N[1] < s) s = G[1] / N[1]
                 printf "%.6f,0,0,0,%.6f,0,0,0,1 %dx%d\n", s, s, G[1], G[2]
                 exit
             }
@@ -104,7 +107,8 @@ scale_fixed() {
                 sx = G[1] / N[1]; sy = G[2] / N[2]; tx = ty = 0        # stretch
             } else {
                 k = N[2] / G[2]; if (N[1] / G[1] < k) k = N[1] / G[1]  # fit
-                if (m == "integer" && int(k) >= 1) k = int(k)          # 2x, 3x...
+                # 2x, 3x...
+                if (m == "integer" && int(k) >= 1) k = int(k)
                 sx = sy = 1 / k; tx = G[1]/2 - sx*N[1]/2; ty = G[2]/2 - sy*N[2]/2
             }
             fw = tx + sx*N[1]; fh = ty + sy*N[2]
@@ -140,18 +144,24 @@ scale_fixed() {
 #   With the black panels running (panels_start), tells them what to cover
 #   (nothing, once the area fills the whole X screen).
 #   The X screen is ZOOM_FB, made bigger if the area (or, with
-#   ZOOM_FB_VIEW=1, the zoomed view) reaches past it.
+#   ZOOM_FB_VIEW=1, the zoomed view) reaches past it. With ZOOM_FB_VIEW=1
+#   it's big enough from the first zoom for all of ZOOM_FB at full TV
+#   height. Once bigger, it never shrinks again (in this process, and in
+#   helpers started after it): X refused to make it bigger again mid-game
+#   ("BadMatch" - RRSetScreenSize), and shrinking it blanks the TV briefly.
 #   False if the zoom failed.
+ZOOM_FB_MAX=""                  # (the biggest X screen set so far, WxH)
 zoom_to() {
     local w=$1 h=$2 x=${3:-0} y=${4:-0} aw=${5:-0} ah=${6:-0}
     local nw=${NATIVE_RES%x*} nh=${NATIVE_RES#*x} t fb panels fw fh rate=() rc=0
     [ -n "$OUTPUT" ] || return 1
     [ -n "$TV_RATE" ] && rate=(--rate "$TV_RATE")
-    fb="${ZOOM_FB:-$NATIVE_RES}"
+    fb="$(_zoom_fb)"
     if [ "$aw" = "0" ] && [ "$w" -ge "$nw" ] && [ "$h" -ge "$nh" ]; then
         fw=${fb%x*}; fh=${fb#*x}
         (( x + w > fw )) && fw=$(( x + w ))
         (( y + h > fh )) && fh=$(( y + h ))
+        _fb_keep
         _display_do "$(printf '%q ' xrandr --fb "$(_screen_size "${fw}x${fh}")" --output "$OUTPUT" \
                             --mode "$NATIVE_RES" "${rate[@]}" --transform none) \
                      || { echo 'WARNING: GPU zoom to ${w}x${h}+${x}+${y} failed'; false; }" || rc=1
@@ -173,7 +183,8 @@ zoom_to() {
         r = (w / h) / (nw / nh)
         if (aw == 0 && r > 0.995 && r < 1.005) { sx = w / nw; sy = h / nh; tx = x; ty = y }
         split(fb, F, "x")
-        if (x + w > F[1]) F[1] = x + w                # X screen holds the area...
+        if (x + w > F[1]) F[1] = x + w                # X screen holds
+                                                      #   the area...
         if (y + h > F[2]) F[2] = y + h
         if (view == 1) {                              # ...and the whole view
             r = int(tx + nw * sx) + 1; if (r > F[1]) F[1] = r
@@ -183,6 +194,9 @@ zoom_to() {
         if (x <= 0 && y <= 0 && x + w >= F[1] && y + h >= F[2]) print "hide"
         else printf "%d %d %d %d %d %d %d %d\n", int(tx) - 2, int(ty) - 2,
                     int(tx + nw * sx) + 2, int(ty + nh * sy) + 2, x, y, w, h }')
+    fw=${fb%x*}; fh=${fb#*x}
+    _fb_keep
+    fb="${fw}x${fh}"
     _display_do "$(printf '%q ' xrandr --fb "$(_screen_size "$fb")" --output "$OUTPUT" \
                         --mode "$NATIVE_RES" "${rate[@]}" --transform "$t" \
                         --filter "${SCALE_FILTER:-bilinear}") \
@@ -191,12 +205,40 @@ zoom_to() {
     return $rc
 }
 
+# _zoom_fb - the smallest X screen for zoom_to: ZOOM_FB (default NATIVE_RES),
+#   with ZOOM_FB_VIEW=1 made big enough for all of it shown at full TV
+#   height (centred, so it reaches past ZOOM_FB on both sides - only the
+#   far side counts), and never less than ZOOM_FB_MAX
+_zoom_fb() {
+    awk -v fb="${ZOOM_FB:-$NATIVE_RES}" -v n="$NATIVE_RES" -v view="${ZOOM_FB_VIEW:-0}" \
+        -v max="$ZOOM_FB_MAX" 'BEGIN {
+        split(fb, F, "x"); split(n, N, "x")
+        if (view == 1) {
+            s = (F[1] / F[2]) / (N[1] / N[2])        # (its shape against
+                                                     #   the TV shape)
+            if (s < 0.995) { r = int((F[1] + F[2] * N[1] / N[2]) / 2) + 1; if (r > F[1]) F[1] = r }
+            if (s > 1.005) { b = int((F[2] + F[1] * N[2] / N[1]) / 2) + 1; if (b > F[2]) F[2] = b }
+        }
+        if (max != "") { split(max, M, "x"); if (M[1] > F[1]) F[1] = M[1]; if (M[2] > F[2]) F[2] = M[2] }
+        printf "%dx%d", F[1], F[2] }'
+}
+
+# _fb_keep - (zoom_to) fw x fh made at least ZOOM_FB_MAX, which then
+#   becomes fw x fh
+_fb_keep() {
+    if [ -n "$ZOOM_FB_MAX" ]; then
+        (( ${ZOOM_FB_MAX%x*} > fw )) && fw=${ZOOM_FB_MAX%x*}
+        (( ${ZOOM_FB_MAX#*x} > fh )) && fh=${ZOOM_FB_MAX#*x}
+    fi
+    ZOOM_FB_MAX="${fw}x${fh}"
+}
+
 # panels_start name [fence]
 #   Black panels over everything the TV shows beside the game's area (Wine
 #   leaves old pictures, or white, there), kept on top of Wine's windows.
 #   zoom_to tells them what to cover. One Python process (panels.py, this
 #   folder; X11 via ctypes, nothing to install). name = a tag in its
-#   command line, e.g. nfsu-panels. fence=1: also pointer barriers round
+#   command line, e.g. GAME_ID-panels. fence=1: also pointer barriers round
 #   the game's area, so the mouse stays on the picture. Start it in the
 #   same (background) process that calls zoom_to.
 panels_start() {
@@ -207,7 +249,8 @@ panels_start() {
         return 1
     fi
     local fb
-    fb="$(_screen_size "${ZOOM_FB:-$NATIVE_RES}")"      # (the whole X screen, for the fence)
+    fb="$(_screen_size "$(_zoom_fb)")"      # (the whole X screen,
+                                            #   for the fence)
     coproc PANELS { exec python3 -I "$COMMON_DIR/panels.py" "$1" "${fb%x*}" "${fb#*x}" "${2:-0}"; }
     PANEL_FD="${PANELS[1]}"
 }
@@ -239,7 +282,8 @@ focus_stop() {
 #   little bigger than the game (that strip is X's black background).
 #   Pointer barriers round the area, plus a black panel over the rest
 #   (panels.py, fence on). tag = a name in its command line, e.g.
-#   tanks-panels. Start it in the main (Inside X) process; panels_stop ends it.
+#   GAME_ID-panels. Start it in the main (Inside X) process; panels_stop
+#   ends it.
 fence_area() {
     local w=$2 h=$3 x=${4:-0} y=${5:-0}
     [ -n "$OUTPUT" ] || return 0
@@ -272,17 +316,49 @@ find_window() {
     done
 }
 
+# zoom_start MONITOR_RES [W H [X Y]]
+#   The display set-up at the start of in_x, for a game whose window is
+#   zoomed: finds the TV (display_output), sets a fixed MONITOR_RES
+#   "monitor" for Wine (fixed_monitor; "" = none), then the starting zoom -
+#   the area W x H at X,Y (default: the whole TV, 1:1), black to black
+#   before anything is drawn. Safe this early because of the fixed monitor:
+#   the zoom can't change what Wine measures. Must run before Wine starts.
+#   START_GEO = the area the TV shows (for start_boot_log, and the follower
+#   starts from it - follow_start).
+#   No TV found, or the zoom failed: a warning, OUTPUT cleared (so no
+#   follower is started), START_GEO = the whole TV, and false - 1 = no TV,
+#   2 = the zoom failed (e.g. to switch the TV's mode instead).
+zoom_start() {
+    local mon="$1" tv="${NATIVE_RES%x*} ${NATIVE_RES#*x} 0 0"
+    shift
+    START_GEO="$tv"
+    display_output "no zoom" || return 1
+    if [ -n "$mon" ]; then
+        fixed_monitor "$GAME_ID-tv" "$mon" \
+            || echo "WARNING: could not set a fixed $mon monitor - the game's screen modes may be refused"
+    fi
+    [ $# -ge 2 ] && START_GEO="$1 $2 ${3:-0} ${4:-0}"
+    echo "Starting zoom: $START_GEO"
+    # shellcheck disable=SC2086
+    zoom_to $START_GEO && return 0
+    echo "WARNING: no zoom (the GPU zoom failed)"
+    OUTPUT=""
+    START_GEO="$tv"
+    return 2
+}
+
 # follow_window [min-w [min-h]]
-#   Background helper (start it with &): zooms the TV to the game's window
-#   (find_window, at least min-w x min-h) whenever its size or position
-#   changes, and says so in the log. No game window (loading, a mode
+#   Background helper (started by follow_start): zooms the TV to the game's
+#   window (find_window, at least min-w x min-h) whenever its size or
+#   position changes, and says so in the log. No game window (loading, a mode
 #   switch): the zoom stays as it is. Checks 4 times a second for the first
 #   20 s (quick rescaling at start-up, so the start-up message cover lifts
 #   sooner), then twice a second. Optional settings:
-#     START_GEO        "W H X Y" - the zoom set when X started. The black
-#                      panels are told it at once (otherwise they'd wait for
-#                      the first change, which may never come), and a first
-#                      window that size is no change at all
+#     START_GEO        "W H X Y" - the zoom set when X started (zoom_start
+#                      sets it). The black panels are told it at once
+#                      (otherwise they'd wait for the first change, which
+#                      may never come), and a first window that size is no
+#                      change at all
 #     FOLLOW_PANELS    name for the black panels beside the game
 #                      (panels_start); empty = no panels
 #     FOLLOW_FENCE     1 = the panels also fence the mouse onto the game
@@ -315,6 +391,7 @@ follow_window() {
         geo="$(find_window "$@")"
         [ -n "$geo" ] || continue
         if [ -n "$FOLLOW_CLIP" ]; then
+            # shellcheck disable=SC2086
             geo="$(_clip_geo $geo $FOLLOW_CLIP)"
             [ -n "$geo" ] || continue
         fi
@@ -339,6 +416,31 @@ follow_window() {
         # shellcheck disable=SC2086
         zoom_to $geo
     done
+}
+
+# follow_start [function | min-w [min-h]]
+#   Starts the window follower in the background (its PID in WATCH_PID -
+#   stopped by the shared cleanup): the shared follow_window with these
+#   sizes, or the script's own function if one is named (e.g.
+#   watch_game_window). Only with the TV found and its zoom working
+#   (OUTPUT - zoom_start clears it if the zoom failed) and xwininfo there;
+#   otherwise a warning, and no zoom. The black panels are called
+#   "$GAME_ID-panels" unless FOLLOW_PANELS says otherwise ("" = none).
+#   Other FOLLOW_... settings can go before it on the same line, e.g.
+#       FOLLOW_HOLD_FULL=1 follow_start 640 480
+#   (it starts from START_GEO, set by zoom_start)
+follow_start() {
+    if [ -z "$OUTPUT" ] || ! command -v xwininfo >/dev/null; then
+        echo "WARNING: no display/zoom or no xwininfo (sudo apt install x11-utils) - no zoom"
+        return 1
+    fi
+    local FOLLOW_PANELS="${FOLLOW_PANELS-$GAME_ID-panels}"
+    if [ -n "$1" ] && declare -F "$1" >/dev/null; then
+        "$@" &
+    else
+        follow_window "$@" &
+    fi
+    WATCH_PID=$!
 }
 
 # _clip_geo W H X Y CW CH - the part of area W x H at X,Y inside 0,0 - CW,CH:

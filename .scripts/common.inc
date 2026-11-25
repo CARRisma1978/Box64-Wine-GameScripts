@@ -2,18 +2,67 @@
 #  Shared launcher code - loaded (sourced) by each game's .sh in roms/windows
 #  Named .inc, not .sh, so EmulationStation doesn't list it as a game.
 #
-#  Functions only: nothing happens until a script calls them. Every setting
-#  (BIGBLOCK, DYNACACHE, CPU_PERFORMANCE...) stays in the game's own script;
-#  these functions read them. A setting a script leaves out gets the
+#  Functions only: nothing happens until a script calls them. Every game
+#  setting (BIGBLOCK, DYNACACHE, CPU_PERFORMANCE...) stays in the game's own
+#  script; these functions read them. A setting a script leaves out gets the
 #  default noted below.
 #
-#  Also loads, from this folder: display.inc (screen scaling and zoom, black
-#  panels, mouse fence, keyboard focus, finding and following the game's
-#  window), sound.inc (sound mixers, FluidSynth) and the start-up messages
-#  (bootlog.inc + bootlog.py).
+#  A game's script sets GAME_ID (its short name, = its prefix folder),
+#  GAME_DIR, GAME_EXE and its settings, loads this, then calls launch "$@"
+#  (see "Launching" below) with its own in_x function.
+#
+#  Also loads, from this folder: settings.cfg (settings shared by all the
+#  games - Wine, Box64, the TV, sound), display.inc (screen scaling and
+#  zoom, black panels, mouse fence, keyboard focus, finding and following
+#  the game's window), sound.inc (sound mixers, FluidSynth) and the
+#  start-up messages (bootlog.inc + bootlog.py).
 # =============================================================================
 
 COMMON_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+# ----- Shared settings (settings.cfg) -----------------------------------------
+# Each KEY="value" line in settings.cfg, unless the game's script has already
+# set that KEY itself (its value wins). Then the built-in values for anything
+# still unset - the same as settings.cfg's, so a missing file changes nothing
+# (start_x notes it in the game's log).
+SETTINGS_NOTE=""
+load_settings() {
+    local file="$COMMON_DIR/settings.cfg" line key
+    if [ -f "$file" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            [[ "$line" =~ ^[[:space:]]*([A-Z_][A-Z0-9_]*)= ]] || continue
+            key="${BASH_REMATCH[1]}"
+            [ -n "${!key+x}" ] && continue          # (set by the game's script)
+            eval "$line"
+        done < "$file"
+    else
+        SETTINGS_NOTE="NOTE: $file not found - built-in settings used"
+    fi
+    : "${WINE_DIR:=$HOME/wine-wow64/wine/bin}"
+    : "${WINE_BIN:=$WINE_DIR/wine}"
+    : "${WINESERVER_BIN:=$WINE_DIR/wineserver}"
+    : "${BOX64_BIN:=$(command -v box64 || echo /usr/local/bin/box64)}"
+    : "${NATIVE_RES:=1920x1080}"
+    : "${SCALE_FILTER:=bilinear}"
+    : "${HDMI_CARD:=vc4hdmi0}"
+    : "${PA_LATENCY_MS=60}"
+    : "${SOUNDFONT:=/usr/share/sounds/sf2/FluidR3_GM.sf2}"
+    # (read by bootlog.py)
+    [ -n "${BOOT_LOG_MIN_WINDOW:-}" ] && export BOOT_LOG_MIN_WINDOW
+    return 0
+}
+load_settings
+
+# ----- The game (GAME_ID) -----------------------------------------------------
+# From the game's short name: its prefix (~/wine-prefixes/GAME_ID) and its
+# log (GAME_DIR/GAME_ID-launch.log, overwritten each launch). A script that
+# sets WINEPREFIX or LOG_FILE itself keeps its own.
+if [ -n "${GAME_ID:-}" ]; then
+    : "${WINEPREFIX:=$HOME/wine-prefixes/$GAME_ID}"
+    : "${LOG_FILE:=$GAME_DIR/$GAME_ID-launch.log}"
+fi
+export WINEPREFIX
 
 # While the start-up messages show, they hold the TV at 1:1 (sharp text, the
 # full TV); the game's zoom waits in ZOOM_CMD_FILE until the black cover goes
@@ -30,12 +79,12 @@ if [ -f "$COMMON_DIR/bootlog.inc" ]; then
     # shellcheck source=/dev/null
     . "$COMMON_DIR/bootlog.inc"
 else
-    start_boot_log() { [ "$BOOT_LOG" = "1" ] && echo "WARNING: $COMMON_DIR/bootlog.inc not found - no start-up messages on screen"; }
+    start_boot_log() { echo "WARNING: $COMMON_DIR/bootlog.inc not found - no start-up messages on screen"; }
     stop_boot_log() { :; }
     boot_hold_release() { :; }
 fi
 
-# ----- Display and sound -------------------------------------------------------
+# ----- Display and sound ------------------------------------------------------
 for _inc in display.inc sound.inc; do
     if [ ! -f "$COMMON_DIR/$_inc" ]; then
         echo "ERROR: $COMMON_DIR/$_inc not found" | tee -a "${LOG_FILE:-/dev/null}"
@@ -85,29 +134,23 @@ export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d;winedbg.exe=d"
 # (only matters when a prefix is created)
 export WINEARCH="win64"
 
-# ----- Wine's and Box64's messages ---------------------------------------------
+# ----- Wine's and Box64's messages --------------------------------------------
 # wine_logging [extra Wine debug channels]
+#   Normally: one line per DLL Wine loads and per program / library Box64
+#   loads - what the start-up messages show; cheap. Wine's "fixme" notes
+#   off (some games print one every frame - hundreds of MB of log).
 #   From the script's settings:
 #     DEBUG=1       Wine's errors (+ crash details, +seh) and Box64's crash
-#                   reports with backtraces - big log, slower start. Any
-#                   extra channels given are added (e.g. +loaddll)
-#     BOOT_LOG=1    (DEBUG=0) one line per DLL Wine loads and per program /
-#                   library Box64 loads - what the start-up messages show;
-#                   cheap. Wine's "fixme" notes off (some games print one
-#                   every frame - 360 MB of log once in nfs6)
-#     neither       Wine and Box64 quiet
-#   BOOT_LOG=1 also: Box64's lines straight to stderr, so they show as they
-#   happen. RDTSC_1GHZ=1: steadier timing on the Pi's slow counter.
+#                   reports with backtraces instead - big log, slower start.
+#                   Any extra channels given are added (e.g. +loaddll)
+#     RDTSC_1GHZ=1  steadier timing on the Pi's slow counter
+#   Box64's lines go straight to stderr, so they show as they happen.
 wine_logging() {
-    export WINEDEBUG="-all" BOX64_LOG=0
+    export WINEDEBUG="fixme-all,+loaddll" BOX64_LOG=1 BOX64_TRACE_FILE=stderr
     if [ "$DEBUG" = "1" ]; then
         export WINEDEBUG="err+all,fixme-all,+seh${1:+,$1}"
-        export BOX64_LOG=1 BOX64_SHOWSEGV=1 BOX64_SHOWBT=1
-    elif [ "$BOOT_LOG" = "1" ]; then
-        export WINEDEBUG="fixme-all,+loaddll"
-        export BOX64_LOG=1
+        export BOX64_SHOWSEGV=1 BOX64_SHOWBT=1
     fi
-    [ "$BOOT_LOG" = "1" ] && export BOX64_TRACE_FILE=stderr
     [ "$RDTSC_1GHZ" = "1" ] && export BOX64_RDTSC_1GHZ=1
     return 0
 }
@@ -181,48 +224,266 @@ box64_setup() {
     return 0
 }
 
-# ----- Wine prefix ------------------------------------------------------------
-# prefix_setup [name]
-#   Creates the prefix on the first run. With a name, also finishes a
-#   pending prefix update here (not in the background while the game
-#   starts), once after each Wine update - marker .<name>_wine_updated in the
-#   prefix. Sets PREFIX_UPDATED=1 when it did. A prefix it has just created
-#   is already up to date with this Wine: only the marker is written.
-PREFIX_UPDATED=0
-prefix_setup() {
-    local inf="${WINE_DIR%/bin}/share/wine/wine.inf" mark="$WINEPREFIX/.$1_wine_updated"
-    if [ ! -f "$WINEPREFIX/system.reg" ]; then
-        echo "Creating Wine prefix (first run - this takes a while)..."
-        mkdir -p "$WINEPREFIX"
-        wine wineboot -i
-        wineserver -w
-        [ -n "$1" ] && [ -f "$inf" ] && [ -f "$WINEPREFIX/system.reg" ] && stat -c %Y "$inf" > "$mark"
-    fi
-    [ -n "$1" ] || return 0
-    if [ -f "$inf" ] && [ "$(stat -c %Y "$inf")" != "$(cat "$mark" 2>/dev/null)" ]; then
-        echo "Updating Wine prefix (once)..."
-        wine wineboot -u
-        wineserver -w
-        stat -c %Y "$inf" > "$mark"
-        PREFIX_UPDATED=1
+# ----- OpenGL (Mesa) ----------------------------------------------------------
+# gl_setup [gl33] - for a game drawn with OpenGL (its own, or through Wine's
+#   Direct3D / DirectDraw):
+#     - Mesa skips its GL error checking (MESA_NO_ERROR)
+#     - GLTHREAD (the script's setting): 1 = Mesa's GL work on its own
+#       thread, 0 = off; not set = Mesa's default
+#     - gl33 (or the script's GL33=1): report OpenGL 3.3 (the Pi's V3D
+#       reports 3.1), for wined3d's modern GLSL path
+gl_setup() {
+    export MESA_NO_ERROR=1
+    case "${GLTHREAD:-}" in
+        1) export mesa_glthread=true ;;
+        0) export mesa_glthread=false ;;
+    esac
+    if [ "$1" = "gl33" ] || [ "${GL33:-}" = "1" ]; then
+        export MESA_GL_VERSION_OVERRIDE=3.3 MESA_GLSL_VERSION_OVERRIDE=330
     fi
     return 0
+}
+
+# ----- Set-up steps (shown by the start-up messages) --------------------------
+# step "Label" command [args...]
+#   Runs one set-up task in this shell (so the variables it sets are kept)
+#   and logs a line when it starts and one when it ends:
+#     [setup] Label...
+#     [setup] Label: result (12.3s)
+#   The start-up messages (bootlog.py) pin these at the top of the screen,
+#   with a live counter while one runs - shown whenever one takes half a
+#   second or more, or fails. The command can set STEP_RESULT for the result
+#   word (default "done"; "FAILED" when it returns non-zero).
+#   Use it only for work that's really being done, not "nothing to do".
+step() {
+    local label="$1" t r us
+    shift
+    STEP_RESULT=""
+    echo "[setup] $label..."
+    t="${EPOCHREALTIME/[.,]/}"
+    "$@"
+    r=$?
+    us=$(( ${EPOCHREALTIME/[.,]/} - t ))
+    [ "$r" -ne 0 ] && STEP_RESULT="FAILED"
+    printf '[setup] %s: %s (%d.%ds)\n' "$label" "${STEP_RESULT:-done}" \
+        $(( us / 1000000 )) $(( us / 100000 % 10 ))
+    return "$r"
+}
+
+# setup_done - after the game's set-up (prefix, registry...) and before it
+#   starts: from here on, the start-up messages time the game's own start
+#   (their progress bar and what they learn for next time never include the
+#   set-up, however long it took)
+setup_done() { echo "[setup-done]"; }
+
+# ----- Wine prefix ------------------------------------------------------------
+# prefix_setup
+#   Creates the prefix on the first run, and finishes a pending prefix
+#   update here (not in the background while the game starts), once after
+#   each Wine update - marker .wine_updated in the prefix. Sets
+#   PREFIX_UPDATED=1 when it did. A prefix it has just created is already
+#   up to date with this Wine: only the marker is written. Then shares the
+#   prefix's Wine files with the other games (prefix_share).
+PREFIX_UPDATED=0
+prefix_setup() {
+    local inf="${WINE_DIR%/bin}/share/wine/wine.inf" mark="$WINEPREFIX/.wine_updated" stamp=""
+    [ -f "$inf" ] && stamp="$(stat -c %Y "$inf")"
+    if [ ! -f "$WINEPREFIX/system.reg" ]; then
+        mkdir -p "$WINEPREFIX"
+        step "Creating Wine prefix (first run)" _wineboot -i
+        [ -n "$stamp" ] && [ -f "$WINEPREFIX/system.reg" ] && echo "$stamp" > "$mark"
+    fi
+    if [ -n "$stamp" ] && [ "$stamp" != "$(cat "$mark" 2>/dev/null)" ]; then
+        # The shared copy first, then this prefix - on its own files, so the
+        # update never writes into a file other games share
+        share_master "$stamp"
+        prefix_unshare "before the update"
+        rm -f "$WINEPREFIX/.shared"
+        step "Updating Wine prefix (new Wine version)" _wineboot -u
+        echo "$stamp" > "$mark"
+        PREFIX_UPDATED=1
+    fi
+    prefix_share "$stamp"
+    return 0
+}
+
+# _wineboot -i|-u - creates / updates the prefix (WINEPREFIX), waits for Wine
+_wineboot() {
+    wine wineboot "$1"
+    wineserver -w
+    [ -f "$WINEPREFIX/system.reg" ]
+}
+
+# ----- Sharing Wine's files between the game prefixes -------------------------
+# Every prefix holds its own ~600 MB copy of Wine's files (drive_c/windows/
+# system32 and syswow64) - nearly all identical. With sharing on, each
+# prefix's identical files are hard links to one copy, kept in a plain
+# prefix of their own: ~/wine-prefixes/.master (made and kept up to date by
+# the wine module, or here if it's missing). Only files at the same place
+# with the same contents are shared; anything a game changes or adds stays
+# its own.
+#   - On/off: the wine module's "Share identical Wine files between game
+#     prefixes" (share_prefixes in WINE_SETUP_CFG).
+#   - PREFIX_LINK=0 in a game's script: that game never shares (it gets its
+#     own copies back if it did); marker .nolink in its prefix, so the wine
+#     module's "Share now" leaves it out too.
+#   - A prefix is never updated while it shares (Wine writes its new files
+#     into the existing ones): it gets its own copies first, and is shared
+#     again afterwards.
+#   - A script that puts its own file into system32 / syswow64 must replace
+#     the file, not write into it: cp --remove-destination. A Windows
+#     program that does (e.g. an installer) writes into it - call
+#     prefix_private before running it.
+#   Markers: .shared in a prefix = shared with this Wine version's master;
+#   .wine_updated in the master = the Wine version it's up to date with.
+#   Needs hardlink (util-linux).
+WINE_SETUP_CFG="${WINE_SETUP_CFG:-/opt/retropie/configs/all/wine-setup.cfg}"
+SHARE_MASTER="$(dirname "$WINEPREFIX")/.master"
+
+share_enabled() {
+    [ "$(grep -oP '^share_prefixes\s*=\s*"\K[^"]*' "$WINE_SETUP_CFG" 2>/dev/null | tail -n1)" = "on" ]
+}
+
+# share_master stamp - makes sure the master is up to date with this Wine
+#   (stamp = wine.inf's time); false if sharing is off or it can't be
+share_master() {
+    share_enabled && [ -n "$1" ] || return 1
+    [ "$(cat "$SHARE_MASTER/.wine_updated" 2>/dev/null)" = "$1" ] && return 0
+    step "Preparing the shared Wine files (once per Wine version)" _share_master_update "$1"
+}
+_share_master_update() (
+    export WINEPREFIX="$SHARE_MASTER"
+    rm -f "$WINEPREFIX/.wine_updated"
+    if [ -f "$WINEPREFIX/system.reg" ]; then
+        _unshare_files "$WINEPREFIX"
+        _wineboot -u
+    else
+        mkdir -p "$WINEPREFIX"
+        _wineboot -i
+    fi || return 1
+    echo "$1" > "$WINEPREFIX/.wine_updated"
+)
+
+# prefix_share stamp - shares this prefix's Wine files (when sharing is on,
+#   PREFIX_LINK isn't 0 and they aren't shared with this Wine's master yet)
+prefix_share() {
+    local stamp="$1"
+    [ -f "$WINEPREFIX/system.reg" ] || return 0
+    if [ "${PREFIX_LINK:-1}" = "0" ]; then
+        touch "$WINEPREFIX/.nolink"
+        prefix_unshare "PREFIX_LINK=0"
+        rm -f "$WINEPREFIX/.shared"
+        return 0
+    fi
+    rm -f "$WINEPREFIX/.nolink"
+    share_enabled && [ -n "$stamp" ] || return 0
+    [ "$(cat "$WINEPREFIX/.shared" 2>/dev/null)" = "$stamp" ] && return 0
+    if ! command -v hardlink >/dev/null; then
+        echo "WARNING: hardlink not found (util-linux) - Wine files not shared"
+        return 0
+    fi
+    share_master "$stamp" || return 0
+    step "Sharing Wine files with the other games" _share_files "$stamp"
+}
+
+# _share_files stamp - links this prefix's identical files to the master's:
+#   same place (folder and name) and same contents only
+_share_files() {
+    local d out opts=(-p -o -t -f -m) files=0 kib=0
+    hardlink --help 2>&1 | grep -q -- '--respect-dir' && opts+=(-d)
+    for d in system32 syswow64; do
+        [ -d "$SHARE_MASTER/drive_c/windows/$d" ] && [ -d "$WINEPREFIX/drive_c/windows/$d" ] || continue
+        out="$(hardlink "${opts[@]}" "$SHARE_MASTER/drive_c/windows/$d" "$WINEPREFIX/drive_c/windows/$d" 2>&1)" \
+            || { echo "$out"; return 1; }
+        read -r files kib < <(echo "$out" | awk -v f="$files" -v k="$kib" '
+            /^Linked:/ { f += $2 }
+            /^Saved:/  { m = ($3 == "B") ? 1/1024 : ($3 == "KiB") ? 1 : ($3 == "MiB") ? 1024 : ($3 == "GiB") ? 1048576 : 0
+                         k += $2 * m }
+            END { printf "%d %d\n", f, k }')
+    done
+    echo "$1" > "$WINEPREFIX/.shared"
+    STEP_RESULT="$files files, $(( kib / 1024 )) MB saved"
+}
+
+# prefix_private why - before running a Windows program that may write
+#   into Wine's files (an installer, say): this prefix gets its own copy of
+#   every file it shares, and is shared again (identical files only) on the
+#   game's next start
+prefix_private() {
+    prefix_unshare "$1"
+    rm -f "$WINEPREFIX/.shared"
+}
+
+# prefix_unshare why - gives this prefix its own copy of every Wine file it
+#   shares (nothing to do if it shares none)
+prefix_unshare() {
+    [ -n "$(find "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/windows/syswow64" \
+            -type f -links +1 -print -quit 2>/dev/null)" ] || return 0
+    step "Unsharing Wine files ($1)" _unshare_files "$WINEPREFIX"
+}
+_unshare_files() {
+    local f n=0
+    while IFS= read -r -d '' f; do
+        cp -p "$f" "$f.unshare" && mv -f "$f.unshare" "$f" && n=$((n + 1))
+    done < <(find "$1/drive_c/windows/system32" "$1/drive_c/windows/syswow64" \
+                 -type f -links +1 -print0 2>/dev/null)
+    STEP_RESULT="$n files"
 }
 
 # import_reg file applied-copy
 #   Imports a .reg file only when it differs from the copy saved after the
 #   last import (each import is a full Box64 + Wine start-up)
 import_reg() {
-    local reg="$1" old="$2" win
-    cmp -s "$reg" "$old" && return 0
+    cmp -s "$1" "$2" && return 0
+    step "Registry settings ($(basename "$1"))" _import_reg "$1" "$2"
+}
+_import_reg() {
+    local reg="$1" old="$2" win r
     case "$reg" in
         "$WINEPREFIX/drive_c/"*) win="C:\\${reg#"$WINEPREFIX/drive_c/"}" ;;
         *)                       win="Z:$reg" ;;
     esac
     win="${win//\//\\}"
-    echo "Applying registry settings ($(basename "$reg"))..."
     wine regedit /S "$win" && cp "$reg" "$old"
+    r=$?
     wineserver -w
+    STEP_RESULT="imported"
+    return "$r"
+}
+
+# wine_base_reg [dsound] - the start of a game's .reg file: the Wine
+#   settings every game uses. A script writes this, then its own keys:
+#       { wine_base_reg; cat <<EOF ... EOF; } > "$reg"
+#   - Wine mustn't change the TV's screen mode (the scripts zoom and scale
+#     the picture themselves)
+#   - a black Wine desktop (beside / around the game's picture)
+#   - Wine's sound output for SOUND_MIXER: the ALSA mixer (0) and plain ALSA
+#     (1) = "alsa", PulseAudio (2) = "pulse"
+#   - dsound: software-mixed DirectSound (fixed hangs in several games)
+wine_base_reg() {
+    cat <<'EOF'
+REGEDIT4
+
+; Wine mustn't change the TV's screen mode, or react to the scripts' zoom
+[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
+"UseXRandR"="N"
+"UseXVidMode"="N"
+
+; Black Wine desktop
+[HKEY_CURRENT_USER\Control Panel\Colors]
+"Background"="0 0 0"
+
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"Wallpaper"=""
+
+; Wine's sound output (SOUND_MIXER)
+[HKEY_CURRENT_USER\Software\Wine\Drivers]
+EOF
+    if [ "$SOUND_MIXER" = "2" ]; then echo '"Audio"="pulse"'; else echo '"Audio"="alsa"'; fi
+    if [ "$1" = "dsound" ]; then
+        printf '\n; Software-mixed DirectSound\n[HKEY_CURRENT_USER\\Software\\Wine\\DirectSound]\n"HardwareAcceleration"="Emulation"\n'
+    fi
+    echo
 }
 
 # ----- LAV Filters (DirectShow) -----------------------------------------------
@@ -242,7 +503,7 @@ import_reg() {
 #   are in the prefix; false (with a warning) if they aren't.
 LAV_INSTALLED=0
 lav_setup() {
-    local dir="$1" merit="$2" lost="${3:+ - $3}" src ax le
+    local dir="$1" merit="$2" lost="${3:+ - $3}" src
     local installed="$WINEPREFIX/.lavfilters_installed" fixed="$WINEPREFIX/.lavsplitter_merit"
     if [ ! -f "$installed" ]; then
         src="$(find "$dir" -iname 'LAVSplitter.ax' 2>/dev/null | head -n1)"
@@ -250,29 +511,137 @@ lav_setup() {
             echo "WARNING: LAVSplitter.ax not found in $dir$lost"
             return 1
         fi
-        echo "Installing LAV Filters from $(dirname "$src") (first run only)..."
-        mkdir -p "$WINEPREFIX/drive_c/LAVFilters"
-        cp -rf "$(dirname "$src")"/. "$WINEPREFIX/drive_c/LAVFilters/"
-        for ax in LAVSplitter.ax LAVAudio.ax; do
-            wine 'C:\windows\syswow64\regsvr32.exe' /s "C:\\LAVFilters\\$ax"
-        done
-        wineserver -w
+        echo "LAV Filters from $(dirname "$src")"
+        step "Installing LAV Filters (first run)" _lav_install "$(dirname "$src")" || return 1
         touch "$installed"
         rm -f "$fixed"
     fi
     LAV_INSTALLED=1
     [ "$PREFIX_UPDATED" = "1" ] && rm -f "$fixed"
     if [ "$(cat "$fixed" 2>/dev/null)" != "$merit" ]; then
-        echo "Re-registering LAV Splitter (merit $merit)..."
-        le="${merit:6:2}${merit:4:2}${merit:2:2}${merit:0:2}"      # (little-endian)
-        wine reg add \
-            'HKCR\CLSID\{083863F1-70DE-11d0-BD40-00A0C911CE86}\Instance\{171252A0-8820-4AFE-9DF8-5C92B2D66B04}' \
-            /v FilterData /t REG_BINARY /f /reg:32 /d \
-            "02000000${le}0200000000000000307069330C0000000100000001000000000000000000000030747933000000006000000060000000317069330000000001000000010000000000000000000000307479330000000070000000600000000000000000000000000000000000000083EB36E44F52CE119F530020AF0BA770" \
-            && echo "$merit" > "$fixed"
-        wineserver -w
+        step "Registering LAV Splitter (merit $merit)" _lav_merit "$merit" && echo "$merit" > "$fixed"
     fi
     return 0
+}
+_lav_install() {
+    local ax
+    mkdir -p "$WINEPREFIX/drive_c/LAVFilters"
+    cp -rf "$1"/. "$WINEPREFIX/drive_c/LAVFilters/" || return 1
+    for ax in LAVSplitter.ax LAVAudio.ax; do
+        wine 'C:\windows\syswow64\regsvr32.exe' /s "C:\\LAVFilters\\$ax"
+    done
+    wineserver -w
+    STEP_RESULT="installed"
+}
+_lav_merit() {
+    local le="${1:6:2}${1:4:2}${1:2:2}${1:0:2}" r       # (little-endian)
+    wine reg add \
+        'HKCR\CLSID\{083863F1-70DE-11d0-BD40-00A0C911CE86}\Instance\{171252A0-8820-4AFE-9DF8-5C92B2D66B04}' \
+        /v FilterData /t REG_BINARY /f /reg:32 /d \
+        "02000000${le}0200000000000000307069330C0000000100000001000000000000000000000030747933000000006000000060000000317069330000000001000000010000000000000000000000307479330000000070000000600000000000000000000000000000000000000083EB36E44F52CE119F530020AF0BA770"
+    r=$?
+    wineserver -w
+    return "$r"
+}
+
+# ----- Settings into the environment ------------------------------------------
+# vsync_setup - VSYNC for Mesa: 0 = off (vblank_mode=0), 1 or empty = the
+#   game decides (Mesa's default), 2 = always on (vblank_mode=3)
+vsync_setup() {
+    case "$VSYNC" in
+        0) export vblank_mode=0 ;;
+        2) export vblank_mode=3 ;;
+    esac
+    return 0
+}
+
+# log_settings [VAR | NAME=text]... - the line that starts the game's part
+#   of the log: the date, then the standard settings the script has (in this
+#   order), then the given ones (a variable's name, or text to show as it is)
+log_settings() {
+    local v line="=== $(date) ==="
+    for v in GAME_RES VSYNC GLTHREAD BIGBLOCK X87DOUBLE CALLRET STRONGMEM DYNACACHE \
+             RDTSC_1GHZ CPU_PERFORMANCE SOUND_MIXER MOUSE_FENCE "$@"; do
+        if [[ "$v" == *=* ]]; then
+            line+=" $v"
+        elif [ -n "${!v+x}" ]; then
+            line+=" $v=${!v}"
+        fi
+    done
+    echo "$line"
+}
+
+# ----- Launching --------------------------------------------------------------
+# launch "$@" - the end of every game's script:
+#   --kill          close a stuck game over SSH (kill_game)
+#   (no argument)   from EmulationStation: the script's own check_game
+#                   function if it has one (it exits, with its own message,
+#                   if something is missing), then checks Box64, Wine, the
+#                   game's exe (in GAME_DIR, or its GAME_EXE_DIR subfolder
+#                   if the script sets one) and CHECK_FILES (an array of any
+#                   more files it needs), empties the log, then starts X
+#                   just for the game, on EmulationStation's console
+#                   (HIDE_CURSOR=1: no mouse pointer), and runs the script
+#                   again inside it
+#   --in-x          (inside X) output to the log, no terminal as input (or
+#                   Wine starts a console helper for it), the shared cleanup
+#                   when it ends, no screen blanking (a gamepad doesn't
+#                   reset it), Mesa's vsync (VSYNC) - then the script's in_x
+#                   function: the display, the start-up messages, the
+#                   set-up, the sound and the game
+CHECK_FILES=()
+launch() {
+    if [ "$1" = "--kill" ]; then
+        kill_game
+        exit 0
+    fi
+    if [ "$1" != "--in-x" ]; then
+        declare -F check_game >/dev/null && check_game
+        check_files "$GAME_DIR/${GAME_EXE_DIR:+$GAME_EXE_DIR/}$GAME_EXE" "${CHECK_FILES[@]}"
+        : > "$LOG_FILE"
+        local opts=(-quiet)
+        [ "$HIDE_CURSOR" = "1" ] && opts+=(-nocursor)
+        start_x "${opts[@]}"
+        wineserver -k 2>/dev/null       # (nothing left running)
+        exit 0
+    fi
+    exec < /dev/null >> "$LOG_FILE" 2>&1
+    MAIN_PID=$$                         # (helpers can stop when this does)
+    trap cleanup EXIT INT TERM
+    xset s off -dpms s noblank 2>/dev/null
+    vsync_setup
+    in_x
+    exit 0
+}
+
+# ----- Cleaning up ------------------------------------------------------------
+# cleanup - when the script ends inside X (set up by launch): stops the
+#   start-up messages, the window watcher (WATCH_PID), the black panels, the
+#   focus helper, Wine, the sound mixer and FluidSynth, everything added with
+#   cleanup_add, and puts the CPU governor back. Each step does nothing if
+#   that part wasn't started.
+# cleanup_add pattern|PID - also stop this when the script ends: a PID, or a
+#   pattern matched against command lines (pkill -f) - for a game's own
+#   background helpers. Added where the helper is started.
+CLEANUP_ITEMS=()
+cleanup_add() { CLEANUP_ITEMS+=("$1"); }
+cleanup() {
+    local item
+    stop_boot_log
+    [ -n "${WATCH_PID:-}" ] && kill "$WATCH_PID" 2>/dev/null
+    for item in "${CLEANUP_ITEMS[@]}"; do
+        if [[ "$item" =~ ^[0-9]+$ ]]; then
+            kill "$item" 2>/dev/null
+        else
+            pkill -u "$(id -u)" -f "$item" 2>/dev/null
+        fi
+    done
+    panels_stop
+    focus_stop
+    wineserver -k 2>/dev/null
+    fluidsynth_stop
+    sound_mixer_stop
+    restore_governor
 }
 
 # ----- CPU governor -----------------------------------------------------------
@@ -299,6 +668,7 @@ start_x() {
     local vt
     vt="$(tty 2>/dev/null | sed -n 's|^/dev/tty\([0-9][0-9]*\)$|\1|p')"
     vt="${XDG_VTNR:-${vt:-1}}"
+    [ -n "$SETTINGS_NOTE" ] && echo "$SETTINGS_NOTE" >> "$LOG_FILE"
     xinit /bin/bash "$(readlink -f "$0")" --in-x -- :0 vt"$vt" \
         -nolisten tcp -keeptty "$@" >> "$LOG_FILE" 2>&1
     stamp "X closed" >> "$LOG_FILE"
@@ -330,7 +700,8 @@ game_running() {
     names="${names,,}"
     while read -r p name; do
         [[ "$names" == *" ${name,,} "* ]] || continue
-        GAME_CMDLINE="$(tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline")" || continue   # (gone)
+        # (gone)
+        GAME_CMDLINE="$(tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline")" || continue
         [ -n "${GAME_CMDLINE// /}" ] || GAME_CMDLINE="$name"
         return 0
     done < <(ps -u "$(id -u)" -o pid=,comm=)

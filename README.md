@@ -8,19 +8,35 @@ Launch scripts for running classic Windows games from EmulationStation on a **Ra
 
 > **Keys and registration details are never stored in the scripts.** Games that need them read them from a small text file in the game's folder (listed in each game's notes below). These files are in `.gitignore`. Keep them private and don't upload them.
 
+## What's new: the overhaul (November 2026)
+
+This release is an overhaul of all the Wine game scripts (`nfs3.sh`, which runs a native ARM64 build, is unchanged). Much of it was done for **consistency**: the scripts were written one game at a time, and each had grown its own way of doing the same jobs. Now they all work the same way:
+
+- **The same layout and settings in every script:** Display, Performance and Sound sections in the same order, with the same setting names, values and notes (`HIDE_CURSOR`, `MOUSE_FENCE`, `VSYNC`, the Box64 options, `DEBUG`, `SOUND_MIXER` and so on). Anything only one game needs comes after them.
+- **More shared code:** starting X for the game, checking its files, the registry basics, the starting zoom, following the game's window, cleaning up and `--kill` are now all in `.scripts`. Each game's script holds only what's special about that game.
+- **A shared settings file, `.scripts/settings.cfg`:** the Wine and Box64 paths, the TV's resolution and scaling, the HDMI port, the MIDI soundfont and the start-up message size, set once for all games. A game's script can still set any of them for itself.
+- **Sharing Wine's files between games (optional):** every prefix holds about 600 MB of Wine files, nearly all identical. With sharing on, the identical files become hard links to one master copy (`~/wine-prefixes/.master`), saving about 16 GB across the 29 games on my Pi. Anything a game changes or adds stays its own. Sharing is turned on or off in the `wine` module's menu in RetroPie-Setup ([Box64-Wine-Install](https://github.com/CARRisma1978/Box64-Wine-Install)), which also has "Share now". A game can opt out with `PREFIX_LINK=0` in its script.
+- **The same sound mixer numbers in every game:** `SOUND_MIXER=0` is a game-only ALSA mixer (now used by every game with sound), `1` is straight to the HDMI sound, `2` is a private PulseAudio.
+- **The same start-up in every game:** everything is set up inside the game's own X session, and the start-up messages show each setup step and how long it took (only when there's real work to do, e.g. on a first run). A game started with no Wine prefix at all sets itself up from scratch, with no manual steps.
+- **The same log in every game:** in the game's folder, named after the game (e.g. `td6-launch.log`), with one line at the top listing the settings used.
+- **Test and diagnostic switches removed:** settings that only existed for trying things out are now fixed at the values that work, and the start-up messages are always shown.
+- **Small fixes found along the way**, e.g. Test Drive 6's mouse pointer now starts in view on its launcher, and Lemmings' drop-down menus no longer make the pointer jump.
+
+**Upgrading from the earlier scripts:** replace all the `.sh` scripts and the whole `.scripts` folder (including the new `settings.cfg`). On its first launch, a game may import its registry settings again once. Some files left in the game folders and prefixes by the earlier scripts (older log and settings file names) are no longer used; they're harmless and can be deleted.
+
 ## What the scripts do
 
 Each script starts its own X session from EmulationStation, runs the game in Wine through Box64, and closes everything when the game ends. Along the way they:
 
 - **Fill the TV without changing its mode.** The game runs at its own resolution, and the Pi's display hardware scales or zooms the picture up to the TV (no GPU work). Scripts that follow the game's window adjust automatically to whatever resolution is picked in the game, with black panels at the sides for 4:3.
 - **Keep the mouse and keyboard on the game.** There's no window manager, so the pointer is fenced onto the picture where needed, and a helper keeps the keyboard focus on the game.
-- **Mix sound for the Pi's HDMI**, which plays one stream at a time. Games that need two (sound effects plus MIDI music or video soundtracks) get a private mixer just for that game. EmulationStation and the emulators keep using plain ALSA.
+- **Mix sound for the Pi's HDMI**, which plays one stream at a time. Each game gets a private mixer just for itself, so sound effects, MIDI music and video soundtracks can play together, and no sound loses its start while the TV's HDMI audio wakes up. EmulationStation and the emulators keep using plain ALSA.
 - **Play MIDI music** through FluidSynth, started only while the game runs.
-- **Set up a separate Wine prefix per game** (`~/wine-prefixes/<game>`), and import registry settings only when they change.
-- **Show start-up messages** on screen while the game loads, then a black screen until the game is ready, so resolution changes happen out of sight.
+- **Set up a separate Wine prefix per game** (`~/wine-prefixes/<game>`), and import registry settings only when they change. Optionally, the identical Wine files in all the prefixes are shared (see [What's new](#whats-new-the-overhaul-november-2026)).
+- **Show start-up messages** on screen while the game loads (including any setup steps, with their times), then a black screen until the game is ready, so resolution changes happen out of sight.
 - **Write a log** in the game's folder on each launch.
 
-All settings (resolution, scaling, sound mixer, Box64 options and so on) are at the top of each script, with notes.
+Each game's settings (resolution, scaling, sound mixer, Box64 options and so on) are at the top of its script, with notes. Settings about the Pi, the TV and the installed software, shared by all the games, are in `.scripts/settings.cfg`.
 
 To close a stuck game over SSH, run its script with `--kill`, e.g.:
 
@@ -30,12 +46,13 @@ bash ~/RetroPie/roms/windows/nfsu.sh --kill
 
 ### The `.scripts` folder
 
-Shared code, loaded by every game script. The files are named `.inc` / `.py` and the folder is hidden, so EmulationStation doesn't list them as games.
+Shared code and settings, loaded by every game script. The files are named `.inc` / `.py` / `.cfg` and the folder is hidden, so EmulationStation doesn't list them as games.
 
 | File | What it does |
 |---|---|
-| `common.inc` | Box64 and Wine settings, starting and stopping Wine, prefix setup, logging, `--kill` |
-| `display.inc` | Scaling and zooming the picture to the TV, following the game's window, black panels, mouse fence, keyboard focus |
+| `settings.cfg` | The settings shared by all the games: Wine and Box64 paths, the TV's resolution and scaling, HDMI port, soundfont, start-up message size |
+| `common.inc` | Loading `settings.cfg`, starting each game (X, file checks, setup, cleanup), Box64 and Wine settings, prefix setup and sharing, logging, `--kill` |
+| `display.inc` | Scaling and zooming the picture to the TV, the starting zoom, following the game's window, black panels, mouse fence, keyboard focus |
 | `sound.inc` | The private sound mixers (PulseAudio or ALSA) and FluidSynth |
 | `bootlog.inc` / `bootlog.py` | The start-up messages and black cover while the game loads |
 | `panels.py` | Black panels beside the picture, and the mouse fence |
@@ -97,8 +114,7 @@ The versions, patches and extras used for each game in my setup, so you can set 
 - **Product IDs (optional):** put the Product IDs from your own install in `aoe2-pid.txt` in the game folder: Age of Kings on line 1, The Conquerors on line 2 (e.g. `12345-123-1234567-12345`, copied from the registry of a PC where the game is installed). Without it, all zeros are used. Age of Kings runs with that; The Conquerors hasn't been tested without its own ID.
 
 ### Angry Birds
-- **Sound fix (done by the script):** the game has a start-up race that often leaves it silent under Box64. With `SOUND_PATCH=1`, the script changes 23 bytes in `AngryBirds.exe` so the sound thread waits instead of quitting. The original is kept as `AngryBirds.exe.orig`.
-- Sound goes through a private mixer (Wine found no ALSA format it could use directly).
+- **Sound fix (done by the script):** the game has a start-up race that often leaves it silent under Box64. The script changes 23 bytes in `AngryBirds.exe` so the sound thread waits instead of quitting. The original is kept as `AngryBirds.exe.orig`.
 - **Registration:** if you have registered the game, put your registered `settings.lua` and `bi_data.lua` in a `registration` folder in the game folder; the script restores them into a fresh prefix.
 
 ### Colin McRae Rally 04
@@ -114,7 +130,6 @@ The versions, patches and extras used for each game in my setup, so you can set 
 
 ### Half-Life
 - Retail WON version (not Steam). Runs in OpenGL; Direct3D is never used, because GoldSrc's Direct3D path hangs the display.
-- Sound goes through a game-only ALSA mixer (`SOUND_MIXER=2`), so no sound loses its start while the TV's HDMI audio wakes up.
 - **CD key (optional):** put your CD key on the first line of `hl-cdkey.txt` in the game folder, with or without the dashes. It's imported into the registry once (and again if you change it), so a new Wine prefix doesn't ask for it. Without the file, the game asks for the key as normal.
 
 ### Jazz Jackrabbit 2
@@ -144,7 +159,7 @@ The versions, patches and extras used for each game in my setup, so you can set 
 ### Need for Speed: High Stakes / Road Challenge
 - **[NFS4 Modern Patch](http://veg.by/en/projects/nfs4/) v0.1.0** (2016) by Evgeny Vrublevsky: reads its settings from `nfs4.ini` instead of the registry, plus many fixes.
 - **nGlide 2.10** (Zeus Software), as an alternative renderer.
-- The renderer is chosen in the script, not in `nfs4.ini`: set `RENDERER` to `dx7` (Direct3D 7, 32-bit colour, the default) or `nglide` (nGlide, 16-bit). The script writes it into `nfs4.ini` as `ThrashDriver` on every launch.
+- The renderer is chosen in the script, not in `nfs4.ini`: set `GAME_RENDERER` to `dx7` (Direct3D 7, 32-bit colour, the default) or `nglide` (nGlide, 16-bit). The script writes it into `nfs4.ini` as `ThrashDriver` on every launch.
 
 ### Need for Speed: Porsche 2000 / Porsche Unleashed
 - European **Need for Speed: Porsche 2000**.
@@ -154,7 +169,7 @@ The versions, patches and extras used for each game in my setup, so you can set 
 ### Need for Speed: Hot Pursuit 2
 - Official **v2.42** patch.
 - **HP2WSFix 2.9.1**, thefirefox12537's fork of [xan1242's widescreen fix](https://github.com/xan1242/HP2WSFix) (`scripts\HP2WSFix.asi`), loaded by the [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) as `dinput.dll`.
-- **Known issue:** changing the resolution in the game's options doesn't fully apply until the game is restarted (`RES_CHANGE_FIX` keeps the picture usable meanwhile).
+- **Known issue:** changing the resolution in the game's options doesn't fully apply until the game is restarted (the script keeps the picture usable meanwhile). The new resolution is right from the next launch.
 
 ### Need for Speed: Underground
 - European **v1.0**. No patches needed.
@@ -345,11 +360,11 @@ git apply -p0 /path/to/nfs2se-texture-fix.patch
 ## Requirements
 
 - **Raspberry Pi 5** with **RetroPie** on **Raspberry Pi OS Bookworm Lite 64-bit**.
-- **The Pi set to output 1080p (1920x1080), not 4K.** These scripts are designed to run at 1080p: every script assumes it (`NATIVE_RES="1920x1080"`), sets the TV to that mode for each game, and scales the picture to fit it.
+- **The Pi set to output 1080p (1920x1080), not 4K.** These scripts are designed to run at 1080p: they assume it (`NATIVE_RES="1920x1080"` in `.scripts/settings.cfg`), set the TV to that mode for each game, and scale the picture to fit it.
 - **Box64, Wine and their dependencies**, installed with the RetroPie-Setup modules from [Box64-Wine-Install](https://github.com/CARRisma1978/Box64-Wine-Install):
-  - `wine-deps`, `box64` and `wine` for every game. Use **Wine 11.18** - later versions don't currently work (see that repo's README).
+  - `wine-deps`, `box64` and `wine` for every game. Use **Wine 11.18** - later versions don't currently work (see that repo's README). Sharing Wine's files between the games is turned on in the `wine` module's menu.
   - `fluidsynth` for games with MIDI music (3D Pinball, DX-Ball, Lemmings).
-  - `pulseaudio` only if you set a game's `SOUND_MIXER=1`.
+  - `pulseaudio` only if you set a game's `SOUND_MIXER=2`.
 - A **Windows** system in EmulationStation (set up by the `wine` module).
 - `python3`, for the shared helpers and the `.py` patches (or use the `.ps1` patches on Windows).
 
@@ -360,7 +375,7 @@ git apply -p0 /path/to/nfs2se-texture-fix.patch
 | Hardware | Raspberry Pi 5 (16 GB), 1080p over HDMI |
 | OS | Raspberry Pi OS Bookworm Lite 64-bit (Debian 12.15) |
 | RetroPie | 4.8.12 |
-| Box64 | v0.4.5 (30d5c77), with Dynarec |
+| Box64 | v0.4.5 (e99ca51), with Dynarec |
 | Wine | 11.18 WoW64, vanilla (Kron4ek) |
 | X server | xorg-server 2:21.1.7-3+rpt3+deb12u13 |
 
@@ -369,10 +384,11 @@ git apply -p0 /path/to/nfs2se-texture-fix.patch
 1. Copy the `.sh` scripts and the `.scripts` folder into `~/RetroPie/roms/windows/`. The `.scripts` folder must sit next to the scripts.
 2. Install each game into its folder under `~/RetroPie/roms/windows/` (see the table above), with any fixes it needs.
 3. Run the patches from [`game-fixes`](#the-game-fixes-folder) for the games that need them: Jazz Jackrabbit 2, Need for Speed: Underground 2, OutRun 2006 and Serious Sam (and optionally NFS II SE). The `game-fixes` folder itself doesn't need to be on the Pi.
-4. Check the settings at the top of each script. `NATIVE_RES` is `1920x1080` in every script; if your Pi runs at a different resolution, change it in all of them.
-5. Add the games to EmulationStation's `gamelist.xml` for the Windows system, or restart EmulationStation.
+4. Check `.scripts/settings.cfg` (the Wine and Box64 paths, `NATIVE_RES="1920x1080"`, the HDMI port), then the settings at the top of each game's script.
+5. Optional: turn on sharing of Wine's files between the games in the `wine` module's menu (RetroPie-Setup), to save about 600 MB per game.
+6. Add the games to EmulationStation's `gamelist.xml` for the Windows system, or restart EmulationStation.
 
-If you edit the scripts on Windows, save them with **Unix (LF)** line endings. In Notepad++: *Edit → EOL Conversion → Unix (LF)*. Scripts with Windows (CRLF) line endings fail on the Pi.
+If you edit the scripts or `settings.cfg` on Windows, save them with **Unix (LF)** line endings. In Notepad++: *Edit → EOL Conversion → Unix (LF)*. Scripts with Windows (CRLF) line endings fail on the Pi.
 
 ## Credits
 

@@ -7,8 +7,8 @@
 #  over the area the TV shows, above Wine's desktop, with the newest lines of
 #  LOG_FILE and the seconds since X started. The text is the same size on the
 #  TV in every game: X's built-in "fixed" font, enlarged to BOOT_LOG_SCALE
-#  times its size on the TV (2.25 = how it looks in DX-Ball) whatever zoom the
-#  script is using.
+#  times its size on the TV (2.25 = as in a 640x480 game zoomed to full
+#  height) whatever zoom the script is using.
 #  Ending: GAP seconds before the game is due, the text goes and the window
 #  becomes a black cover over the whole screen. It lifts the moment the
 #  screen looks exactly as the game's real start did last time - the game's
@@ -21,6 +21,14 @@
 #  Progress bar (green, along the bottom): how far through the messages,
 #  measured by the lines written against the last launch's count. None on a
 #  first launch.
+#  Set-up tasks (the "[setup] ..." lines from common.inc's step): pinned at
+#  the top under the title, one line each, with a live counter while one
+#  runs and its time and result once it's done. Shown once one takes half a
+#  second or more (or fails) - a normal launch looks as before. While the
+#  set-up runs: no progress bar, and the black cover never comes early.
+#  "[setup-done]" (common.inc's setup_done, after the game's set-up): from
+#  there on the game's own start is timed - the progress bar and what's
+#  learned for next time never include the set-up, however long it took.
 #  First launch / new layout (nothing learned): black from the moment the
 #  game's window appears until the picture has been unchanged for STEADY
 #  seconds. The cover never stays more than 10 s after the game shows, or
@@ -30,7 +38,7 @@
 #  BOOT_LOG_MIN_WINDOW (environment, "WxH", default 100x40): the game's
 #  windows smaller than this are ignored altogether - for a game whose
 #  start-up splash picture would otherwise end the messages early and be
-#  taken for a dialog (e.g. Serious Sam: 640x480).
+#  taken for a dialog (e.g. 640x480, when the splash is smaller).
 #
 #  TV held at 1:1 (BOOT_HOLD_FILE exists - set up by start_boot_log): the
 #  script's zoom waits in ZOOM_CMD_FILE; it's carried out when the cover goes
@@ -38,22 +46,23 @@
 #
 #  Arguments: tag log title TVmode scale W H X Y timefile exe...
 # =============================================================================
-import atexit, ctypes as c, ctypes.util, os, subprocess, sys, time
+import atexit, ctypes as c, ctypes.util, os, re, subprocess, sys, time
 from collections import deque
 log, title = sys.argv[2], sys.argv[3].encode()         # argv[1] = tag
 nw, nh = map(int, sys.argv[4].split("x"))               # the TV's mode
 scale = float(sys.argv[5])                              # text size on the TV
 w, h, x0, y0 = map(int, sys.argv[6:10])                 # area the TV shows
-tfile = sys.argv[10]                                    # last launch's start-up time
+tfile = sys.argv[10]                                    # last start-up's timing
 exes = {e.lower().encode() for e in sys.argv[11:]}
-try:                # smallest window of the game's that counts (BOOT_LOG_MIN_WINDOW)
+try:                # smallest window of the game's that counts
+                    #   (BOOT_LOG_MIN_WINDOW)
     MIN_W, MIN_H = map(int, os.environ.get("BOOT_LOG_MIN_WINDOW", "100x40").lower().split("x"))
 except ValueError:
     MIN_W, MIN_H = 100, 40
 STEADY = 3          # seconds unchanged = the game's picture is ready (learning)
-GAP = 0.0           # extra black before the game, in seconds. 0 = messages until
-                    # the game's first window appears, then black only while the
-                    # game gets its picture ready
+GAP = 0.0           # extra black before the game, in seconds. 0 = messages
+                    # until the game's first window appears, then black only
+                    # while the game gets its picture ready
 
 x11 = c.CDLL(c.util.find_library("X11") or "libX11.so.6")
 class XSetWindowAttributes(c.Structure):
@@ -155,7 +164,7 @@ try:
     xrr.XRRFreeScreenResources.argtypes = [P]
     xrr.XRRGetCrtcTransform.argtypes = [P, W, c.POINTER(c.POINTER(XRRCrtcTransformAttributes))]
 except (OSError, AttributeError):
-    xrr = None                          # (no libXrandr: window and screen size only)
+    xrr = None                          # (no libXrandr: size only)
 
 dpy = x11.XOpenDisplay(None)
 if not dpy:
@@ -163,8 +172,9 @@ if not dpy:
 root = x11.XDefaultRootWindow(dpy)
 depth = x11.XDefaultDepth(dpy, x11.XDefaultScreen(dpy))
 sa = XSetWindowAttributes(background_pixel=0, override_redirect=1)
+# CWBackPixel | CWOverrideRedirect
 win = x11.XCreateWindow(dpy, root, x0, y0, w, h, 0, 0, 1, None,
-                        (1 << 1) | (1 << 9), c.byref(sa))   # CWBackPixel|CWOverrideRedirect
+                        (1 << 1) | (1 << 9), c.byref(sa))
 gc = x11.XCreateGC(dpy, win, 0, None)
 font = x11.XLoadQueryFont(dpy, b"fixed")
 if not font:
@@ -172,7 +182,8 @@ if not font:
 fs = font.contents
 x11.XSetFont(dpy, gc, fs.fid)
 x11.XSetBackground(dpy, gc, 0x000000)
-fw, fh, asc = fs.max_bounds.width, fs.ascent + fs.descent, fs.ascent   # 6, 13, 11
+# The font's character width, height and ascent (6, 13, 11 for "fixed")
+fw, fh, asc = fs.max_bounds.width, fs.ascent + fs.descent, fs.ascent
 
 # The script's GPU zoom enlarges this area to fit the TV; s = how much the
 # font must be enlarged on top, so it ends up 'scale' times its size on the
@@ -180,9 +191,10 @@ fw, fh, asc = fs.max_bounds.width, fs.ascent + fs.descent, fs.ascent   # 6, 13, 
 zoom = min(nw / w, nh / h)
 s = max(1.0, scale / zoom)
 sw, sh = fw * s, fh * s                 # character spacing (fractional)
-cw, ch = -(-int(sw * 1000) // 1000), -(-int(sh * 1000) // 1000)   # glyph size, rounded up
+# glyph size, rounded up
+cw, ch = -(-int(sw * 1000) // 1000), -(-int(sh * 1000) // 1000)
 cols, rows = int(w / sw) - 1, int(h / sh) - 2
-GREY, GREEN, TRACK = 0xB0B0B0, 0x55DD55, 0x303030
+GREY, GREEN, TRACK, WHITE, RED = 0xB0B0B0, 0x55DD55, 0x303030, 0xFFFFFF, 0xFF6060
 
 glyphs = {}
 def glyph(code, colour):
@@ -218,13 +230,13 @@ def text(t, row, colour):
     # One line, padded to the full width (drawn with its background: no flicker)
     t = t[:cols].ljust(cols)
     y = int(row * sh)
-    if s == 1.0:                            # no enlarging needed: the font itself
+    if s == 1.0:                            # no enlarging: the font itself
         x11.XSetForeground(dpy, gc, colour)
         x11.XDrawImageString(dpy, win, gc, 4, y + asc, t, len(t))
         return
     end = len(t.rstrip())
     for i in range(end):
-        code = t[i] if 32 <= t[i] < 127 else 63            # '?' for anything odd
+        code = t[i] if 32 <= t[i] < 127 else 63            # odd ones: '?'
         x11.XCopyArea(dpy, glyph(code, colour), win, gc, 0, 0, cw, ch, 4 + int(i * sw), y)
     x11.XSetForeground(dpy, gc, 0)
     x = 4 + int(end * sw)
@@ -237,7 +249,8 @@ try:
     xfx.XFixesCreateRegion.restype = W
     xfx.XFixesCreateRegion.argtypes = [P, P, c.c_int]
     xfx.XFixesSetWindowShapeRegion.argtypes = [P, W, c.c_int, c.c_int, c.c_int, W]
-    xfx.XFixesSetWindowShapeRegion(dpy, win, 2, 0, 0,             # ShapeInput: empty
+    # ShapeInput: empty
+    xfx.XFixesSetWindowShapeRegion(dpy, win, 2, 0, 0,
                                    xfx.XFixesCreateRegion(dpy, None, 0))
 except (OSError, AttributeError):
     pass
@@ -367,7 +380,35 @@ end_lines, end_time = 0, None           # this launch: when the messages went
 
 # The log: newest lines for the screen, and a count of the lines written
 # since X started (what was there before - set-up before X - isn't counted)
+# or since "[setup-done]". Set-up task lines go to 'tasks' instead.
 nl, based = 0, False
+t0 = base = time.time()                 # base: the game's start is timed from
+tasks = []                              # [label, result (None = running),
+                                        #   start, seconds]
+task_end, setup_marked = 0.0, False
+TASK_START = re.compile(rb"^\[setup\] (.+)\.\.\.$")
+TASK_END = re.compile(rb"^\[setup\] (.+): (\S.*) \((\d+(?:\.\d+)?)s\)$")
+def setup_line(l, now):
+    global base, nl, task_end, setup_marked
+    if l == b"[setup-done]":
+        base, nl, setup_marked = now, 0, True
+        return
+    m = TASK_END.match(l)
+    if m:
+        for t in reversed(tasks):
+            if t[0] == m.group(1) and t[1] is None:
+                break
+        else:
+            t = [m.group(1), None, now, 0.0]
+            tasks.append(t)
+        t[1], t[3] = m.group(2), float(m.group(3))
+        if based:
+            task_end = now
+        return
+    m = TASK_START.match(l)
+    if m:
+        tasks.append([m.group(1), None, now, 0.0])
+
 def read_log():
     global f, buf, nl, based, dirty
     if f is None:
@@ -377,13 +418,40 @@ def read_log():
             return
     data = f.read()
     if data:
-        if based:
-            nl += data.count(b"\n")
+        now = time.time()
         *done, buf = (buf + data).split(b"\n")
         for l in done:
-            lines.append(l.replace(b"\r", b"").expandtabs(4))
+            l = l.replace(b"\r", b"")
+            if based:
+                nl += 1
+            if l.startswith(b"[setup"):
+                setup_line(l, now)
+            else:
+                lines.append(l.expandtabs(4))
         dirty = True
     based = True                            # (from now on, lines are counted)
+
+def setup_running(now):
+    # A set-up task running, or one just finished (another may follow) and
+    # no "[setup-done]" yet
+    return (any(t[1] is None for t in tasks) or
+            (not setup_marked and task_end and now - task_end < 2.0))
+
+def shown_tasks(now):
+    # The tasks to pin: all of them, once any has taken 0.5 s or more or
+    # failed (at most half the screen - the newest)
+    if any((t[1] is None and now - t[2] >= 0.5) or
+           (t[1] is not None and (t[3] >= 0.5 or t[1].startswith(b"FAILED")))
+           for t in tasks):
+        return tasks[-max(1, rows // 2):]
+    return []
+
+def task_text(t, now, res_w):
+    # "  Label ........  12.3s  result" - times and results lined up
+    label, res, start, secs = t
+    right = b"%6.1fs  %-*s" % ((now - start) if res is None else secs, res_w, res or b"")
+    left = b"  " + label + b" "
+    return left + b"." * max(1, cols - len(left) - len(right) - 1) + b" " + right
 
 # Progress bar along the bottom, one text line high: lines so far against
 # the last launch's count (or seconds, if there's no count). Slows down near
@@ -393,7 +461,7 @@ def progress(now):
     if last_lines:
         p = nl / last_lines
     elif last_end:
-        p = (now - t0) / last_end
+        p = (now - base) / last_end
     else:
         return None
     return p if p <= 0.9 else 0.9 + 0.09 * (1 - 0.5 ** ((p - 0.9) / 0.1))
@@ -414,11 +482,12 @@ def bar(p):
     if full - fw_:
         x11.XFillRectangle(dpy, win, gc, 4 + fw_, bar_y, full - fw_, ch)
 close_at = max(1.0, last_time - GAP) if last_time else None
-t0 = time.time()
-mode = "log"            # log -> cover (black) -> watch (cover gone, learning) -> end
+mode = "log"            # log -> cover (black) -> watch (cover gone,
+                        #   learning) -> end
 state, since, cover_t, seen_t = None, 0.0, 0.0, None
 start_view, next_draw = view(), 0.0
 dialog_t, paused, learned = None, False, False
+pinned = 0                              # set-up task lines at the top
 while True:
     now = time.time()
     read_log()
@@ -445,15 +514,16 @@ while True:
         time.sleep(0.1)
         continue
     if st != state:
-        state, since = st, now              # something changed - start counting again
+        state, since = st, now              # changed - start counting again
     if st is not None and seen_t is None:
         seen_t = now                        # the game's first window
     if mode == "log" and (st is not None or view() != start_view or
-                          (close_at is not None and now - t0 >= close_at)):
+                          (close_at is not None and not setup_running(now)
+                           and now - base >= close_at)):
         # (the game's window appeared, the script rescaled the TV, or it's time)
         # Text off; black cover over the whole screen (it may be rescaled)
         mode, cover_t = "cover", now
-        end_lines, end_time = nl, now - t0      # (for next launch's progress bar)
+        end_lines, end_time = nl, now - base    # (next launch's progress bar)
         x11.XMoveResizeWindow(dpy, win, 0, 0, 8192, 8192)
         x11.XClearWindow(dpy, win)
         x11.XRaiseWindow(dpy, win)
@@ -464,18 +534,18 @@ while True:
             and now - since >= STEADY):
         # The first picture to stay unchanged STEADY s is the game's real
         # start (resizing/rescaling is over by then) - remember it
-        record(since - t0, st)
+        record(since - base, st)
         learned = True
     if mode == "cover":
         lift = st is not None and (
-            flat(st) == final                   # exactly as it started last time
+            flat(st) == final                   # as it started last time
             or now - since >= STEADY            # (new layout: once it's steady)
             or now - seen_t >= 10)              # (never steady: give up)
         if lift or (st is None and now - cover_t > GAP + 15):
-            x11.XUnmapWindow(dpy, win)      # the game - or, if it's very late, the desktop
+            x11.XUnmapWindow(dpy, win)      # the game (very late: the desktop)
             mode = "watch"
         else:
-            x11.XRaiseWindow(dpy, win)      # Wine raises its windows - stay on top
+            x11.XRaiseWindow(dpy, win)      # stay above Wine's windows
         x11.XFlush(dpy)
         time.sleep(0.05)
         continue
@@ -489,21 +559,28 @@ while True:
                 break                       # it never appeared - give up
         elif now - seen_t >= 15:
             if state is not None:
-                record(since - t0, state)   # (never steady: the last picture)
+                record(since - base, state)  # (never steady: the last picture)
             break
         time.sleep(0.25)
         continue
-    time.sleep(0.05)                        # check the screen 20 times a second,
-    if now < next_draw:                     # redraw the text 4 times a second
+    time.sleep(0.05)                        # check the screen 20x a second,
+    if now < next_draw:                     # redraw the text 4x a second
         continue
     next_draw = now + 0.25
-    x11.XRaiseWindow(dpy, win)              # Wine raises its windows - stay on top
+    x11.XRaiseWindow(dpy, win)              # stay above Wine's windows
     text(b"%s - starting... %5.1fs" % (title, now - t0), 0, GREEN)
+    pin = shown_tasks(now)
+    if len(pin) != pinned:
+        pinned, dirty = len(pin), True
+    res_w = max([len(t[1] or b"") for t in pin] + [4])
+    for i, t in enumerate(pin):             # (each time: the running counter)
+        text(task_text(t, now, res_w), i + 1, RED if (t[1] or b"").startswith(b"FAILED") else WHITE)
     if dirty:
-        for i in range(rows):
-            text(lines[i] if i < len(lines) else b"", i + 1, GREY)
+        recent = list(lines)[-(rows - pinned):] if rows > pinned else []
+        for i in range(rows - pinned):
+            text(recent[i] if i < len(recent) else b"", pinned + i + 1, GREY)
         dirty = False
     p = progress(now)
     if p is not None:
-        bar(p)
+        bar(0 if setup_running(now) else p)   # (empty while the set-up runs)
     x11.XFlush(dpy)

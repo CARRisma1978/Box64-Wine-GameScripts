@@ -19,16 +19,81 @@
 # =============================================================================
 
 # ===================== Settings =====================
-GAME_DIR="$HOME/RetroPie/roms/windows/half-life"   # \\<pi>\roms\windows\half-life
-GAME_EXE="hl.exe"
+GAME_ID="hl"                # short name: its Wine prefix
+                            #   (~/wine-prefixes/hl) and log
+# \\<pi>\roms\windows\half-life
+GAME_DIR="$HOME/RetroPie/roms/windows/half-life"
+GAME_EXE="hl.exe"           # exactly as spelled on disk
 
-WINE_DIR="$HOME/wine-wow64/wine/bin"
-WINE_BIN="$WINE_DIR/wine"
-WINESERVER_BIN="$WINE_DIR/wineserver"
-BOX64_BIN="$(command -v box64 || echo /usr/local/bin/box64)"
+# ----- Display ----------------------------------------------------------------
+# gl = OpenGL, soft = software renderer (set in the registry as EngineType).
+# Set here - the in-game Video menu choice is overridden every launch
+# (don't use that menu).
+GAME_RENDERER="gl"
+# The game's resolution - one of the game's own modes only (anything else
+# falls back to 640x480):
+#   640x480, 800x600, 1024x768, 1152x864, 1280x960  (soft: 640x480 is smoothest)
+GAME_RES="1280x960"
+HIDE_CURSOR=0               # 1 = no mouse pointer, 0 = pointer shown
+                            #   (either way it's fenced into the picture - it
+                            #   can't reach the black bars)
 
-export WINEPREFIX="$HOME/wine-prefixes/hl"
-LOG_FILE="$GAME_DIR/hl-launch.log"
+# ----- Performance ------------------------------------------------------------
+FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core
+                    #   (top-left; games drawn with OpenGL only)
+VSYNC=2             # 0 = off (smoother below 60 fps, may tear)
+                    # 1 = the game decides (Mesa's default)
+                    # 2 = always on (no tearing)
+                    #   (gl: HL never asks for vsync itself - 2 stops tearing)
+X87DOUBLE=1         # Box64 x87 maths: 0 = lower precision where possible
+                    #   (faster), 1 = always double precision (more accurate),
+                    #   2 = follows the game's own precision setting;
+                    #   empty = Box64's default (0)
+                    #   If physics/movement act oddly with 0, use 1
+BIGBLOCK=2          # Box64 code block size 0-3 (bigger = less translating);
+                    #   empty = Box64's default (2)
+CALLRET=            # Box64 call/ret optimisation (faster): 0 = off, 1 = on,
+                    #   2 = on, also for changed code (3 = an extra for
+                    #   LoongArch CPUs only, not the Pi); empty = Box64's
+                    #   default (2). Can crash some games - if so, try 0
+DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and
+                    #   loading): empty = on, one cache shared by all games
+                    #   (~/.cache/box64); 1 = on, this game's own cache
+                    #   (box64-cache in its prefix); 0 = off
+CPU_PERFORMANCE=1   # 1 = CPU governor 'performance' while playing
+                    #   (needs passwordless sudo), 0 = left as it is
+RDTSC_1GHZ=1        # 1 = steadier timing on the Pi's slow counter,
+                    #   0 or empty = off (Box64's default)
+DEBUG=0             # 1 = Wine/Box64 errors and crash details into the log
+                    #   (big log, slower start)
+BOOT_LOG_FULL=0     # start-up messages over the zoomed screen, not the whole
+                    #   TV at 1:1: no Wine desktop here, so the X screen must
+                    #   stay its size
+FPS_MAX=72          # frame cap. With vsync on, the TV's 60 Hz paces the game;
+                    # 72 keeps the cap out of the way (exactly 60 can stutter)
+GLTHREAD=1          # gl: Mesa's GL work on its own thread
+COMPOSITOR=1        # xcompmgr: stops flicker where the menus overlap the game
+DYN_LIGHTS=1        # dynamic lights (muzzle flash, flashlight):
+                    #   0 = off, saves CPU
+
+# Game arguments. OpenGL only:
+#   gl_ztrick 0     = no flickering walls (a 1998 depth trick that breaks on
+#                     modern GL)
+#   gl_texturemode  = trilinear filtering (smooth texture transitions)
+EXTRA_ARGS="+r_dynamic $DYN_LIGHTS"
+GL_ARGS="+gl_ztrick 0 +gl_texturemode GL_LINEAR_MIPMAP_LINEAR"
+
+# ----- Sound ------------------------------------------------------------------
+SOUND_MIXER=0       # 0 = a game-only ALSA mixer: dmix -> loopback ->
+                    #     alsaloop -> HDMI. The HDMI sound stays open for the
+                    #     whole game, so no sound loses its start while the
+                    #     TV's HDMI audio wakes up. Needs alsa-utils
+                    #     (alsaloop) and snd-aloop (loaded by the script)
+                    # 1 = straight to the Pi's HDMI sound through ALSA
+                    # 2 = a private PulseAudio just for this game
+                    # If the chosen mixer can't start: straight to HDMI (1).
+                    # EmulationStation and the emulators always use plain ALSA.
+                    # HDMI port, PulseAudio buffering: .scripts/settings.cfg
 
 # CD key: put it on the first line of this file (just the key - with or
 # without the dashes, e.g. 1234-56789-0123 or 1234567890123). It's imported
@@ -36,87 +101,19 @@ LOG_FILE="$GAME_DIR/hl-launch.log"
 # ask for it.
 # Keep this file private - don't upload it to GitHub. No file = the game
 # asks for the key as normal.
-CDKEY_FILE="$GAME_DIR/hl-cdkey.txt"                # \\<pi>\roms\windows\half-life\hl-cdkey.txt
-
-# ----- Display ----------------------------------------------------------------
-# gl = OpenGL, soft = software renderer (set in the registry as EngineType).
-# Set here - the in-game Video menu choice is overridden every launch
-# (don't use that menu).
-RENDERER="gl"
-# The game's resolution - one of the game's own modes only (anything else
-# falls back to 640x480):
-#   640x480, 800x600, 1024x768, 1152x864, 1280x960  (soft: 640x480 is smoothest)
-GAME_RES="1280x960"
-NATIVE_RES="1920x1080"      # the TV's normal mode
-SCALE_FILTER="bilinear"     # bilinear = smooth, nearest = sharp/blocky
-HIDE_CURSOR=0               # 1 = no X pointer (either way it's fenced into
-                            #     the picture - it can't reach the black bars)
-
-# ----- Performance / looks (1 = on, 0 = off) ----------------------------------
-FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core (top-left)
-VSYNC=1             # gl: force vsync (no tearing; HL never asks for it itself)
-X87DOUBLE=1         # Box64 x87 maths: 0 = lower precision where possible (faster),
-                    #   1 = always double precision (more accurate), 2 = follows the
-                    #   game's own precision setting; empty = Box64's default (0).
-                    #   If physics/movement act oddly with 0, use 1
-BIGBLOCK=2          # Box64 code block size 0-3 (bigger = less translating);
-                    #   empty = Box64's default (2)
-CALLRET=            # Box64 call/ret optimisation (faster): 0 = off, 1 = on,
-                    #   2 = on, also for changed code; empty = Box64's default (2).
-                    #   3 = as 2, plus protection from random crashes (Box64
-                    #   built 26 Oct 2026 or later - check: box64 --version)
-                    #   Can crash some games - try 3, then 0
-DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and loading):
-                    #   empty = on, one cache shared by all games (~/.cache/box64)
-                    #   1 = on, this game's own cache (box64-cache in its prefix)
-                    #   0 = off
-CPU_PERFORMANCE=1   # CPU governor 'performance' while playing (needs passwordless sudo)
-BOOT_LOG=1          # 1 = start-up messages on screen (what Box64 and Wine are
-                    #     loading), then black until the game is ready. Also
-                    #     kept in LOG_FILE. 0 = black screen while starting
-BOOT_LOG_FULL=0     # messages over the zoomed screen, not the whole TV at 1:1:
-                    # no Wine desktop here, so the X screen must stay its size
-RDTSC_1GHZ=1        # 1 = steadier timing on the Pi's slow counter
-                    #   0 or empty = off (Box64's default)
-DEBUG=0             # 1 = Wine/Box64 errors and crash details into LOG_FILE
-FPS_MAX=72          # frame cap. With vsync on, the TV's 60 Hz paces the game;
-                    # 72 keeps the cap out of the way (exactly 60 can stutter)
-GLTHREAD=1          # gl: Mesa's GL work on its own thread
-COMPOSITOR=1        # xcompmgr: stops flicker where the menus overlap the game
-DYN_LIGHTS=1        # dynamic lights (muzzle flash, flashlight): 0 = off, saves CPU
-
-# Game arguments. OpenGL only:
-#   gl_ztrick 0     = no flickering walls (1998 depth trick, breaks on modern GL)
-#   gl_texturemode  = trilinear filtering (smooth texture transitions)
-EXTRA_ARGS="+r_dynamic $DYN_LIGHTS"
-GL_ARGS="+gl_ztrick 0 +gl_texturemode GL_LINEAR_MIPMAP_LINEAR"
-
-# ----- Sound mixer ------------------------------------------------------------
-# 0 = straight to the Pi's HDMI sound through ALSA (as this game has always
-#     run).
-# 2 = a game-only ALSA mixer (as SeriousSam.sh / outrun.sh): dmix ->
-#     loopback -> alsaloop -> HDMI. The HDMI sound stays open for the whole
-#     game, so no sound loses its start while the TV's HDMI audio wakes up.
-#     Needs alsa-utils (alsaloop) and the snd-aloop module (loaded by the
-#     script).
-# 1 = a private PulseAudio just for this game.
-# If the chosen mixer can't start, plain ALSA is used.
-# ES and emulators keep plain ALSA in every case.
-SOUND_MIXER=2
-HDMI_CARD="vc4hdmi0"        # vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
-PA_LATENCY_MS=60            # SOUND_MIXER=1: sound buffered between the game and
-                            # PulseAudio: higher = safer from clicks, sound
-                            # slightly later
+# \\<pi>\roms\windows\half-life\hl-cdkey.txt
+CDKEY_FILE="$GAME_DIR/hl-cdkey.txt"
 
 # ===================== Shared code =====================
-# In the ".scripts" folder next to this script: common.inc (Box64, the Wine
-# prefix, starting X, waiting for the game to close...), which also loads
-# display.inc (screen scaling and zoom, black panels, mouse fence, keyboard
-# focus, finding the game's window), sound.inc (sound mixers, FluidSynth)
-# and the start-up messages on screen (bootlog.inc, bootlog.py)
+# In the ".scripts" folder next to this script: common.inc (settings.cfg,
+# Box64, the Wine prefix, starting X, waiting for the game to close...),
+# which also loads display.inc (screen scaling and zoom, black panels, mouse
+# fence, keyboard focus, finding the game's window), sound.inc (sound
+# mixers, FluidSynth) and the start-up messages on screen (bootlog.inc,
+# bootlog.py)
 COMMON_INC="$(dirname "$(readlink -f "$0")")/.scripts/common.inc"
 if [ ! -f "$COMMON_INC" ]; then
-    echo "ERROR: $COMMON_INC not found" | tee -a "$LOG_FILE"
+    echo "ERROR: $COMMON_INC not found" | tee "${LOG_FILE:-$GAME_DIR/$GAME_ID-launch.log}"
     sleep 5; exit 1
 fi
 # shellcheck source=/dev/null
@@ -133,18 +130,16 @@ esac
 GW=${GAME_RES%x*}; GH=${GAME_RES#*x}
 # The launcher picks the engine from the registry: EngineType 2 = OpenGL,
 # 0 = software
-[ "$RENDERER" = "gl" ] && ENGINE_TYPE=2 || ENGINE_TYPE=0
+[ "$GAME_RENDERER" = "gl" ] && ENGINE_TYPE=2 || ENGINE_TYPE=0
 
-# Wine's and Box64's messages (DEBUG, BOOT_LOG, RDTSC_1GHZ) - shared code
+# Wine's and Box64's messages (DEBUG, RDTSC_1GHZ) - shared code
 wine_logging
 
 # GoldSrc misreads long GL extension strings - report only 1999-era ones
 export MESA_EXTENSION_MAX_YEAR=1999
-export MESA_NO_ERROR=1                         # skip GL error checking
-if [ "$RENDERER" = "gl" ]; then
-    [ "$VSYNC" = "1" ] && export vblank_mode=3 || export vblank_mode=0
-    [ "$GLTHREAD" = "1" ] && export mesa_glthread=true
-fi
+# OpenGL: no error checking, GLTHREAD (gl renderer only) - shared code
+[ "$GAME_RENDERER" = "gl" ] || unset GLTHREAD
+gl_setup
 
 # Box64's settings file (4 cores, speed settings for the game),
 # DYNACACHE, FPS_HUD - shared code
@@ -169,11 +164,6 @@ MENU_W=640; MENU_H=480      # WON Half-Life's menus are always this size
 ZOOM_FB="${FB_W}x${FB_H}"
 ZOOM_FB_VIEW=1
 TV_RATE=60
-
-set_display() {
-    display_output "no zoom" || return
-    zoom_to "$CANVAS_W" "$CANVAS_H" 0 0    # whole area until a window shows
-}
 
 # Background helper (one Python process, X11 via ctypes - nothing to
 # install). Every 0.5s (0.25s for the first 20s, so start-up rescaling is
@@ -295,7 +285,8 @@ while True:
         target = inner_area(w, a.width * a.height) or ((a.width, a.height) + abs_pos(w))
         break
     if not target and not last and not warned and time.time() - t0 >= 20:
-        warned = True               # 20s and nothing to zoom to: list what's there
+        warned = True               # 20s and nothing to zoom to: list
+                                    #   what's there
         print("WARNING: zoom helper found no game window. Windows:", file=sys.stderr)
         for w in topdown(root):
             a = attrs(w)
@@ -318,7 +309,7 @@ EOF
     {
         # Black panels + pointer fence (shared code), in this same process
         # as zoom_to
-        panels_start hl-panels 1
+        panels_start "$GAME_ID-panels" 1
         while read -r geo; do
             if [ "$geo" = "gone" ]; then
                 [ -n "$PANEL_FD" ] && echo hide >&"$PANEL_FD"
@@ -330,29 +321,25 @@ EOF
     }
 }
 
-# Runs before X, with Wine fully stopped afterwards
+# Before the game starts, with Wine fully stopped afterwards
 setup_prefix() {
     # A pending prefix update must finish here, not in the background while
     # the game starts (that stopped Wine's display starting - no game window)
-    prefix_setup hl
+    prefix_setup
 
     # Wine settings + starting values for the game's video settings, and the
     # CD key from CDKEY_FILE (the game keeps it as "Key", the bare 13 digits -
     # only letters and digits are kept). Imported only when they change (each
     # import is a full Box64 + Wine start-up). The key itself is never logged.
-    local reg_new="$WINEPREFIX/drive_c/hl-settings.reg" reg_old="$WINEPREFIX/hl-settings.applied"
+    local reg_new="$WINEPREFIX/drive_c/$GAME_ID-settings.reg" reg_old="$WINEPREFIX/$GAME_ID-settings.applied"
     local cdkey=""
     [ -f "$CDKEY_FILE" ] && cdkey="$(head -n 1 "$CDKEY_FILE" | tr -cd 'A-Za-z0-9')"
-    cat > "$reg_new" <<EOF
-REGEDIT4
-
+    { wine_base_reg; cat <<EOF
 [HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\$GAME_EXE]
 "Version"="winxp"
 
-; Wine mustn't change the TV's screen mode
+; No window manager: Wine places the game's windows itself
 [HKEY_CURRENT_USER\\Software\\Wine\\X11 Driver]
-"UseXRandR"="N"
-"UseXVidMode"="N"
 "Managed"="N"
 
 [HKEY_CURRENT_USER\\Software\\Valve\\Half-Life\\Settings]
@@ -364,10 +351,7 @@ REGEDIT4
 "EngineModeWindowed"=dword:00000001
 ${cdkey:+\"Key\"=\"$cdkey\"}
 EOF
-    # Wine's sound output: PulseAudio (mixer 1), ALSA (mixer 2) or the default (ALSA)
-    { echo; echo '[HKEY_CURRENT_USER\Software\Wine\Drivers]'
-      case "$SOUND_MIXER" in 1) echo '"Audio"="pulse"' ;; 2) echo '"Audio"="alsa"' ;; *) echo '"Audio"=-' ;; esac
-    } >> "$reg_new"
+    } > "$reg_new"
     import_reg "$reg_new" "$reg_old"
 
     # The game's Video menu saves its own choices over these. Put ours back
@@ -395,60 +379,32 @@ EOF
     done
 }
 
-run_game() {
+# Inside X (from launch, shared code)
+in_x() {
+    zoom_start "" "$CANVAS_W" "$CANVAS_H"   # whole area until a window shows
+                                            #   (shared code)
+    xsetroot -solid black 2>/dev/null
+    start_boot_log "$START_GEO" "$GAME_EXE"
+    if [ "$COMPOSITOR" = "1" ] && command -v xcompmgr >/dev/null; then
+        xcompmgr &
+        cleanup_add $!
+    fi
+    set_governor
+    setup_prefix
+    setup_done              # (the start-up messages time the game from here)
+    sound_mixer_start "$GAME_ID"
     cd "$GAME_DIR" || exit 1
-    echo "=== $(date) === RENDERER=$RENDERER GAME_RES=$GAME_RES FPS_MAX=$FPS_MAX DYN_LIGHTS=$DYN_LIGHTS CALLRET=$CALLRET DYNACACHE=$DYNACACHE DEBUG=$DEBUG"
+    log_settings GAME_RENDERER FPS_MAX DYN_LIGHTS
     watch_windows &
-    # shellcheck disable=SC2086
+    cleanup_add hl-zoom-helper
+    # shellcheck disable=SC2086,SC2046
     wine "$GAME_EXE" -windowed \
-        +fps_max "$FPS_MAX" $EXTRA_ARGS $([ "$RENDERER" = "gl" ] && echo "$GL_ARGS") &
+        +fps_max "$FPS_MAX" $EXTRA_ARGS $([ "$GAME_RENDERER" = "gl" ] && echo "$GL_ARGS") &
     # Back as soon as Wine has finished after the game closes (shared code)
     WINE_EXIT_WAIT=0        # started directly: Wine's launcher (start.exe)
                             # ends with the game - never end it early
     wait_for_game $! "$GAME_EXE"
 }
 
-cleanup() {
-    stop_boot_log
-    pkill -f hl-zoom-helper 2>/dev/null
-    panels_stop
-    wineserver -k 2>/dev/null
-    [ -n "$COMP_PID" ] && kill "$COMP_PID" 2>/dev/null
-    sound_mixer_stop
-    restore_governor
-}
-
 # ===================== Main =====================
-if [ "$1" = "--kill" ]; then
-    kill_game                       # (shared code)
-    exit 0
-fi
-
-if [ "$1" != "--in-x" ]; then
-    # From EmulationStation: start X just for the game, on ES's console, so
-    # it exits cleanly back to ES
-    check_files "$GAME_DIR/$GAME_EXE"
-    : > "$LOG_FILE"
-    setup_prefix >> "$LOG_FILE" 2>&1
-    NOCURSOR=""; [ "$HIDE_CURSOR" = "1" ] && NOCURSOR="-nocursor"
-    # shellcheck disable=SC2086
-    start_x -quiet $NOCURSOR
-    wineserver -k 2>/dev/null       # make sure nothing is left running
-    exit 0
-fi
-
-# ----- Inside X -----
-exec >> "$LOG_FILE" 2>&1
-trap cleanup EXIT INT TERM
-xset s off -dpms s noblank 2>/dev/null
-set_display
-xsetroot -solid black 2>/dev/null
-start_boot_log "$CANVAS_W $CANVAS_H 0 0" "$GAME_EXE"
-if [ "$COMPOSITOR" = "1" ] && command -v xcompmgr >/dev/null; then
-    xcompmgr &
-    COMP_PID=$!
-fi
-set_governor
-sound_mixer_start hl   # (shared code; SOUND_MIXER)
-run_game
-exit 0
+launch "$@"                 # (shared code: --kill, X, then in_x)

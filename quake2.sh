@@ -4,7 +4,7 @@
 #  Raspberry Pi 5 / RetroPie / Bookworm Lite 64-bit
 #  Launch from EmulationStation (starts its own X session).
 #
-#  How it works (as nfsu.sh / nfsu2.sh):
+#  How it works:
 #   - ref_gl.dll -> Wine's opengl32 -> Mesa on the Pi's GPU (no wined3d, so
 #     no GL 3.3 override needed).
 #   - The Wine desktop is the TV's size. When the game sets a screen mode
@@ -17,28 +17,22 @@
 #     the screen modes the game can switch to.
 #   - The last window size is remembered, and the next launch zooms to it
 #     before the game appears.
-#   - Prefix setup runs BEFORE X starts, with Wine fully stopped afterwards.
 #
 #  To close a stuck game over SSH:
 #      bash ~/RetroPie/roms/windows/quake2.sh --kill
 #
-#  Log (overwritten each launch): \\<pi>\roms\windows\quake2\quake2.log
+#  Log (overwritten each launch): \\<pi>\roms\windows\quake2\quake2-launch.log
 #  With CONSOLE_LOG=1, also the game's console: ...\quake2\baseq2\qconsole.log
 # =============================================================================
 
 # ===================== Settings =====================
+GAME_ID="quake2"            # short name: its Wine prefix
+                            #   (~/wine-prefixes/quake2) and log
 GAME_DIR="$HOME/RetroPie/roms/windows/quake2"      # \\<pi>\roms\windows\quake2
-GAME_EXE="quake2.exe"       # exactly as spelled on disk (Box64 settings match it)
-
-WINE_DIR="$HOME/wine-wow64/wine/bin"
-WINE_BIN="$WINE_DIR/wine"
-WINESERVER_BIN="$WINE_DIR/wineserver"
-BOX64_BIN="$(command -v box64 || echo /usr/local/bin/box64)"
-
-export WINEPREFIX="$HOME/wine-prefixes/quake2"
-LOG_FILE="$GAME_DIR/quake2.log"
+GAME_EXE="quake2.exe"       # exactly as spelled on disk
 
 # ----- Display ----------------------------------------------------------------
+# The Wine desktop is the TV's size (NATIVE_RES, .scripts/settings.cfg).
 # Pick the resolution in the GAME's Video menu (Apply) - the zoom follows it
 # and the game remembers it for next time. CAUTION: after a resolution change
 # in the game, the next cinematic (e.g. starting a new game) can freeze the
@@ -55,55 +49,58 @@ LOG_FILE="$GAME_DIR/quake2.log"
 # GAME_RES="" = use the game's own choice. Or force one at every launch:
 # 640x480 800x600 1024x768 1280x960 1280x720 1280x768 1600x900 1920x1080
 GAME_RES=""
-NATIVE_RES="1920x1080"      # the TV's mode, and the Wine desktop size
-SCALE_FILTER="bilinear"     # bilinear = smooth, nearest = sharp/blocky
+HIDE_CURSOR=1               # 1 = no mouse pointer, 0 = pointer shown
+                            #   (gamepad/keyboard play)
 
-# ----- Performance / looks (1 = on, 0 = off) ----------------------------------
-FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core (top-left)
-VSYNC=1             # 1 = no tearing (forced in Mesa; the game's own "video sync"
-                    # option has no effect), 0 = off
-X87DOUBLE=1         # Box64 x87 maths: 0 = lower precision where possible (faster),
-                    #   1 = always double precision (more accurate), 2 = follows the
-                    #   game's own precision setting; empty = Box64's default (0).
-                    #   If movement/physics act oddly with 0, use 1
+# ----- Performance ------------------------------------------------------------
+FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core
+                    #   (top-left; games drawn with OpenGL only)
+VSYNC=2             # 0 = off (smoother below 60 fps, may tear)
+                    # 1 = the game decides (Mesa's default)
+                    # 2 = always on (no tearing)
+                    # (the game's own "video sync" option has no effect -
+                    #   2 stops tearing)
+X87DOUBLE=1         # Box64 x87 maths: 0 = lower precision where possible
+                    #   (faster), 1 = always double precision (more accurate),
+                    #   2 = follows the game's own precision setting;
+                    #   empty = Box64's default (0)
+                    # If movement/physics act oddly with 0, use 1
 BIGBLOCK=3          # Box64 code block size 0-3 (bigger = less translating);
-                    #   empty = Box64's default (2) - 3 tested
+                    #   empty = Box64's default (2)
+                    #   (3 tested)
 CALLRET=1           # Box64 call/ret optimisation (faster): 0 = off, 1 = on,
-                    #   2 = on, also for changed code; empty = Box64's default (2).
-                    #   3 = as 2, plus protection from random crashes (Box64
-                    #   built 26 Oct 2026 or later - check: box64 --version)
-                    #   Can crash some games - try 3, then 0 (1 tested)
-DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and loading):
-                    #   empty = on, one cache shared by all games (~/.cache/box64)
-                    #   1 = on, this game's own cache (box64-cache in its prefix)
-                    #   0 = off
-CPU_PERFORMANCE=1   # CPU governor 'performance' while playing (needs passwordless sudo)
-BOOT_LOG=1          # 1 = start-up messages on screen (what Box64 and Wine are
-                    #     loading), then black until the game is ready. Also
-                    #     kept in LOG_FILE. 0 = black screen while starting
-RDTSC_1GHZ=0        # 1 = steadier timing on the Pi's slow counter - try if uneven
+                    #   2 = on, also for changed code (3 = an extra for
+                    #   LoongArch CPUs only, not the Pi); empty = Box64's
+                    #   default (2). Can crash some games - if so, try 0
+DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and
+                    #   loading): empty = on, one cache shared by all games
+                    #   (~/.cache/box64); 1 = on, this game's own cache
+                    #   (box64-cache in its prefix); 0 = off
+CPU_PERFORMANCE=1   # 1 = CPU governor 'performance' while playing
+                    #   (needs passwordless sudo), 0 = left as it is
+RDTSC_1GHZ=0        # 1 = steadier timing on the Pi's slow counter,
                     #   0 or empty = off (Box64's default)
-DEBUG=0             # 1 = Wine errors + Box64 log into LOG_FILE (slower)
+                    # (try 1 if the game's speed is uneven)
+DEBUG=0             # 1 = Wine/Box64 errors and crash details into the log
+                    #   (big log, slower start)
+GLTHREAD=0          # Mesa's GL thread: keep 0 - with it on, changing resolution
+                    #   in the game crashed Mesa as it reloaded the textures (no
+                    #   speed difference seen)
 CONSOLE_LOG=0       # 1 = the game's console into baseq2\qconsole.log, written
-                    #     line by line (kept even if the game freezes) - for
-                    #     tracking down a problem
+                    #   line by line (kept even if the game freezes) - for
+                    #   tracking down a problem
 
-# ----- Sound mixer ------------------------------------------------------------
-# 0 = straight to the Pi's HDMI sound through ALSA (as this game has always
-#     run).
-# 2 = a game-only ALSA mixer (as SeriousSam.sh / outrun.sh): dmix ->
-#     loopback -> alsaloop -> HDMI. The HDMI sound stays open for the whole
-#     game, so no sound loses its start while the TV's HDMI audio wakes up.
-#     Needs alsa-utils (alsaloop) and the snd-aloop module (loaded by the
-#     script).
-# 1 = a private PulseAudio just for this game.
-# If the chosen mixer can't start, plain ALSA is used.
-# ES and emulators keep plain ALSA in every case.
-SOUND_MIXER=0
-HDMI_CARD="vc4hdmi0"        # vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
-PA_LATENCY_MS=60            # SOUND_MIXER=1: sound buffered between the game and
-                            # PulseAudio: higher = safer from clicks, sound
-                            # slightly later
+# ----- Sound ------------------------------------------------------------------
+SOUND_MIXER=0       # 0 = a game-only ALSA mixer: dmix -> loopback ->
+                    #     alsaloop -> HDMI. The HDMI sound stays open for the
+                    #     whole game, so no sound loses its start while the
+                    #     TV's HDMI audio wakes up. Needs alsa-utils
+                    #     (alsaloop) and snd-aloop (loaded by the script)
+                    # 1 = straight to the Pi's HDMI sound through ALSA
+                    # 2 = a private PulseAudio just for this game
+                    # If the chosen mixer can't start: straight to HDMI (1).
+                    # EmulationStation and the emulators always use plain ALSA.
+                    # HDMI port, PulseAudio buffering: .scripts/settings.cfg
 
 # ----- Looks ------------------------------------------------------------------
 FOV="auto"          # auto = 90 on 4:3, widened on 16:9 (106) so you see MORE at
@@ -116,15 +113,29 @@ LIGHT_BOOST=1.5     # gl_modulate (lighting): 1 = original,
                     # 1.5-2 = brighter dark areas without washing out textures
 SHARP_TEXTURES=1    # 1 = gl_round_down 0: textures not shrunk to the size below
                     #     when their size isn't a power of two (sharper)
-ANISOTROPY=8        # gl_anisotropic: textures stay sharp on floors/walls seen at
-                    # an angle. 1 = off, 2/4/8/16 (16 = the Pi's maximum). Small GPU cost.
+ANISOTROPY=8        # gl_anisotropic: textures stay sharp on floors/walls seen
+                    # at an angle. 1 = off, 2/4/8/16 (16 = the Pi's maximum).
+                    # Small GPU cost.
 
-# ===================== Derived settings =====================
-NW=${NATIVE_RES%x*}; NH=${NATIVE_RES#*x}
+# ===================== Shared code =====================
+# In the ".scripts" folder next to this script: common.inc (settings.cfg,
+# Box64, the Wine prefix, starting X, waiting for the game to close...),
+# which also loads display.inc (screen scaling and zoom, black panels, mouse
+# fence, keyboard focus, finding the game's window), sound.inc (sound
+# mixers, FluidSynth) and the start-up messages on screen (bootlog.inc,
+# bootlog.py)
+COMMON_INC="$(dirname "$(readlink -f "$0")")/.scripts/common.inc"
+if [ ! -f "$COMMON_INC" ]; then
+    echo "ERROR: $COMMON_INC not found" | tee "${LOG_FILE:-$GAME_DIR/$GAME_ID-launch.log}"
+    sleep 5; exit 1
+fi
+# shellcheck source=/dev/null
+. "$COMMON_INC"
 
+# ===================== Environment =====================
 # The game's last window ("W H X Y"), remembered for the next launch's early
 # zoom. Delete the file to start at 1:1 instead.
-START_ZOOM_FILE="$WINEPREFIX/.quake2_last_window"
+START_ZOOM_FILE="$WINEPREFIX/.${GAME_ID}_last_window"
 
 # Quake II modes Wine refuses full screen (not in Wine's list of standard
 # screen sizes): the game falls back to a window and turns Fullscreen off.
@@ -171,11 +182,12 @@ fi
 
 # vid_ref / gl_driver = OpenGL through Windows' opengl32 ("default OpenGL" -
 #   undoes an accidental "3dfx OpenGL" pick in the Video menu)
-# s_primary 0     = sound "maximum compatibility" (Wine can't do "maximum performance")
+# s_primary 0     = sound "maximum compatibility" (Wine can't do the
+#                   "maximum performance" setting)
 # s_khz 48        = sound at 48 kHz (the HDMI rate - no resampling)
 # gl_ext_palettedtexture 0 = no 8-bit textures (the Pi's GPU has none anyway)
-# gl_texturemode  = trilinear filtering: smoother texture transitions, no speed cost
-# (+set values are re-applied after config.cfg, so these always win)
+# gl_texturemode  = trilinear filtering: smoother texture transitions, no speed
+# cost (+set values are re-applied after config.cfg, so these always win)
 GAME_ARGS=(+set vid_ref gl +set gl_driver opengl32 +set vid_fullscreen 1
            +set s_primary 0 +set s_khz 48
            +set vid_gamma "$GAMMA" +set gl_modulate "$LIGHT_BOOST" +set fov "$FOV"
@@ -184,31 +196,13 @@ GAME_ARGS=(+set vid_ref gl +set gl_driver opengl32 +set vid_fullscreen 1
 [ -n "$GL_MODE" ] && GAME_ARGS+=(+set gl_mode "$GL_MODE")
 [ "$SHARP_TEXTURES" = "1" ] && GAME_ARGS+=(+set gl_round_down 0)
 
-# ===================== Shared code =====================
-# In the ".scripts" folder next to this script: common.inc (Box64, the Wine
-# prefix, starting X, waiting for the game to close...), which also loads
-# display.inc (screen scaling and zoom, black panels, mouse fence, keyboard
-# focus, finding the game's window), sound.inc (sound mixers, FluidSynth)
-# and the start-up messages on screen (bootlog.inc, bootlog.py)
-COMMON_INC="$(dirname "$(readlink -f "$0")")/.scripts/common.inc"
-if [ ! -f "$COMMON_INC" ]; then
-    echo "ERROR: $COMMON_INC not found" | tee -a "$LOG_FILE"
-    sleep 5; exit 1
-fi
-# shellcheck source=/dev/null
-. "$COMMON_INC"
-
-# ===================== Environment =====================
-
-# Quake II's GL code overflows a buffer on long GL extension strings - only report old ones
+# Quake II's GL code overflows a buffer on long GL extension strings - only
+# report old ones
 export MESA_EXTENSION_MAX_YEAR=2002
-export MESA_NO_ERROR=1                         # skip GL error checking
-[ "$VSYNC" = "1" ] && export vblank_mode=3 || export vblank_mode=0   # 3 = always sync
-# Mesa's GL thread stays off: with it on, changing resolution in the game
-# crashed Mesa while it reloaded the textures (no speed difference seen)
-export mesa_glthread=false
+# OpenGL: no error checking, GLTHREAD - shared code
+gl_setup
 
-# Wine's and Box64's messages (DEBUG, BOOT_LOG, RDTSC_1GHZ) - shared code
+# Wine's and Box64's messages (DEBUG, RDTSC_1GHZ) - shared code
 wine_logging
 # logfile 2 = written line by line (1 is buffered - lost if the game freezes)
 [ "$CONSOLE_LOG" = "1" ] && GAME_ARGS+=(+set logfile 2)
@@ -219,33 +213,14 @@ box64_setup "$GAME_EXE"
 
 # ===================== Helpers =====================
 
-# Runs before X, with Wine fully stopped afterwards
+# The prefix (shared code), then the registry - imported only when it
+# changes (each import is a full Box64 + Wine start-up). (Software-mixed
+# DirectSound: avoids hangs when the game restarts its sound system.)
 setup_prefix() {
-    prefix_setup quake2      # (+ finishes a pending update after a new Wine)
-
-    # All settings in ONE import, only when something changed (each import
-    # is a full Box64 + Wine start-up)
-    local reg_new="$WINEPREFIX/drive_c/quake2-settings.reg" reg_old="$WINEPREFIX/quake2-settings.applied"
-    cat > "$reg_new" <<'EOF'
-REGEDIT4
-
-; Wine mustn't change the TV's screen mode, or react to the GPU zoom
-[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
-"UseXRandR"="N"
-"UseXVidMode"="N"
-
-; Black Wine desktop
-[HKEY_CURRENT_USER\Control Panel\Colors]
-"Background"="0 0 0"
-
-; Software-mixed DirectSound: avoids hangs when the game restarts its sound system
-[HKEY_CURRENT_USER\Software\Wine\DirectSound]
-"HardwareAcceleration"="Emulation"
-EOF
-    # Wine's sound output: PulseAudio (mixer 1), ALSA (mixer 2) or the default (ALSA)
-    { echo; echo '[HKEY_CURRENT_USER\Software\Wine\Drivers]'
-      case "$SOUND_MIXER" in 1) echo '"Audio"="pulse"' ;; 2) echo '"Audio"="alsa"' ;; *) echo '"Audio"=-' ;; esac
-    } >> "$reg_new"
+    prefix_setup
+    local reg_new="$WINEPREFIX/drive_c/$GAME_ID-settings.reg"
+    local reg_old="$WINEPREFIX/$GAME_ID-settings.applied"
+    wine_base_reg dsound > "$reg_new"
     import_reg "$reg_new" "$reg_old"
 }
 
@@ -255,80 +230,42 @@ EOF
 # 1440x1080 is still centred).
 ZOOM_FB="$NATIVE_RES"
 
-# The game's window: followed by the shared follow_window (run_game), and
+# The game's window: followed by the shared follow_window (in_x), and
 # remembered for next time whenever it changes
 follow_window_hook() {
     [ "$2" = "1" ] && echo "$1" > "$START_ZOOM_FILE"
 }
 
-run_game() {
+# Inside X (from launch, shared code)
+in_x() {
+    # A fixed "monitor" the TV's full size (Wine checks screen modes against
+    # the monitor X reports, which otherwise follows the zoom - a mode change
+    # could then be refused), then straight to the size the game will start
+    # at (START_GEO, above; 1:1 if not known), in the top-left corner where
+    # Wine puts the game. The helper takes over from there. (shared code)
+    # shellcheck disable=SC2086
+    zoom_start "$NATIVE_RES" $START_GEO
+    xsetroot -solid black 2>/dev/null
+    start_boot_log "$START_GEO" "$GAME_EXE"     # (the area the TV shows
+                                                #   from the start)
+    set_governor
+    setup_prefix
+    setup_done              # (the start-up messages time the game from here)
+    # Keyboard to the game: with no window manager, X sends key presses to
+    # whatever is under the (hidden) pointer. The keeper gives the focus to
+    # Wine's desktop whenever nothing has it (shared code; stopped by the
+    # shared cleanup).
+    focus_start explorer.exe "$GAME_EXE"
+    sound_mixer_start "$GAME_ID"
     cd "$GAME_DIR" || exit 1
     [ -n "$MODE_FIXED" ] && echo "WARNING: $MODE_FIXED"
-    echo "=== $(date) === GAME_RES=${GAME_RES:-from game} START=${START_GEO:-1:1} FOV=$FOV ANISOTROPY=$ANISOTROPY VSYNC=$VSYNC BIGBLOCK=$BIGBLOCK CALLRET=$CALLRET"
-    if [ -n "$OUTPUT" ] && command -v xwininfo >/dev/null; then
-        FOLLOW_PANELS=quake2-panels follow_window &      # (shared code)
-        WATCH_PID=$!
-    else
-        echo "WARNING: no display or xwininfo (sudo apt install x11-utils) - no zoom"
-    fi
+    log_settings START="$START_GEO" FOV ANISOTROPY
+    follow_start                # (shared code)
     # Wine desktop the size of the TV: the game can't change the real mode
-    wine explorer /desktop=quake2,"$NATIVE_RES" "$GAME_EXE" "${GAME_ARGS[@]}" &
+    wine explorer /desktop="$GAME_ID","$NATIVE_RES" "$GAME_EXE" "${GAME_ARGS[@]}" &
     # Back as soon as Wine has finished after the game closes (shared code)
     wait_for_game $! "$GAME_EXE"
 }
 
-cleanup() {
-    stop_boot_log
-    [ -n "$WATCH_PID" ] && kill "$WATCH_PID" 2>/dev/null
-    panels_stop
-    wineserver -k 2>/dev/null
-    focus_stop
-    sound_mixer_stop
-    restore_governor
-}
-
 # ===================== Main =====================
-if [ "$1" = "--kill" ]; then
-    kill_game                       # (shared code)
-    exit 0
-fi
-
-if [ "$1" != "--in-x" ]; then
-    # From EmulationStation: prefix setup first (no X needed), then X just
-    # for the game, on ES's console, so it exits cleanly back to ES
-    check_files "$GAME_DIR/$GAME_EXE"
-    : > "$LOG_FILE"
-    setup_prefix >> "$LOG_FILE" 2>&1
-    start_x -nocursor -quiet
-    wineserver -k 2>/dev/null       # make sure nothing is left running
-    exit 0
-fi
-
-# ----- Inside X -----
-exec >> "$LOG_FILE" 2>&1
-trap cleanup EXIT INT TERM
-xset s off -dpms s noblank 2>/dev/null   # gamepad input doesn't reset blanking
-display_output "no zoom"
-# A fixed "monitor" the TV's full size. Wine checks screen modes against
-# the monitor X reports, which otherwise follows the zoom - a mode change
-# could then be refused (as found with NFSU).
-if [ -n "$OUTPUT" ]; then
-    fixed_monitor quake2-tv "$NATIVE_RES" \
-        || echo "WARNING: could not set a fixed monitor - resolution changes may fail"
-fi
-# Start at last time's size straight away (black to black: nothing is drawn
-# yet), in the top-left corner where Wine puts the game. Safe this early
-# because of the fixed monitor above. The helper takes over from here.
-echo "Starting zoom: ${START_GEO:-1:1}"
-# shellcheck disable=SC2086
-zoom_to ${START_GEO:-$NW $NH}
-xsetroot -solid black 2>/dev/null
-start_boot_log "${START_GEO:-$NW $NH 0 0}" "$GAME_EXE"   # (the area the TV shows from the start)
-# Keyboard to the game: with no window manager, X sends key presses to
-# whatever is under the (hidden) pointer. The keeper gives the focus to
-# Wine's desktop whenever nothing has it (shared code - replaces Matchbox).
-focus_start explorer.exe "$GAME_EXE"
-set_governor
-sound_mixer_start quake2   # (shared code; SOUND_MIXER)
-run_game
-exit 0
+launch "$@"                 # (shared code: --kill, X, then in_x)

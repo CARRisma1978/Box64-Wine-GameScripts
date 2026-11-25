@@ -3,8 +3,8 @@
 #  Loaded by common.inc; the window itself is bootlog.py in this folder.
 #  Named .inc / .py, not .sh, so EmulationStation doesn't list them as games.
 #
-#  Each game script has its own BOOT_LOG setting; the loading messages shown
-#  are switched on by wine_logging (common.inc). Learned timings are kept
+#  Shown for every game; the loading messages shown are switched on by
+#  wine_logging (common.inc). Learned timings are kept
 #  per game, in its Wine prefix (.boot_log_time).
 # =============================================================================
 
@@ -58,7 +58,6 @@ boot_hold_release() {
 # $2... = the game's exe names - it watches for their windows
 # Text size: BOOT_LOG_SCALE (default 2.25) times the font's size, on the TV
 start_boot_log() {
-    [ "$BOOT_LOG" = "1" ] || return
     command -v python3 >/dev/null || { echo "WARNING: python3 not found - no start-up messages on screen"; return; }
     [ -f "$BOOTLOG_DIR/bootlog.py" ] || { echo "WARNING: $BOOTLOG_DIR/bootlog.py not found - no start-up messages on screen"; return; }
     local area="$1"; shift

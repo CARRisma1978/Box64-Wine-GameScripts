@@ -16,7 +16,8 @@
 import ctypes as c, ctypes.util, os, select, sys
 
 args = sys.argv[1:] + ["", "0", "0", "0"]
-fw, fh, fence = int(args[1] or 0), int(args[2] or 0), args[3] == "1"   # args[0] = tag
+# args[0] = tag
+fw, fh, fence = int(args[1] or 0), int(args[2] or 0), args[3] == "1"
 
 
 def lib(name, so):
@@ -179,7 +180,7 @@ while True:
         show(*pending)
         pending = None
     elif shown:
-        for p in shown:                     # Wine raises its windows - stay on top
+        for p in shown:                     # stay above Wine's windows
             x11.XRaiseWindow(dpy, p)
         x11.XFlush(dpy)
     if not held():

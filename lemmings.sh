@@ -13,82 +13,108 @@
 #     X can't do 256 colours), maximises the window and gives dialogs the
 #     keyboard.
 #   - Sound: the game's sound effects and FluidSynth's MIDI music are mixed
-#     by ALSA (dmix -> loopback -> alsaloop -> HDMI), as the Pi's HDMI only
-#     plays one stream at a time. ES and emulators are untouched.
+#     by the game-only ALSA mixer (dmix -> loopback -> alsaloop -> HDMI), as
+#     the Pi's HDMI only plays one stream at a time. ES and emulators are
+#     untouched.
 #
 #  To close a stuck game over SSH:
 #      bash ~/RetroPie/roms/windows/lemmings.sh --kill
 #
-#  Log (overwritten each launch): \\<pi>\roms\windows\lemmings\lemmings-launch.log
+#  Log (overwritten each launch):
+#     \\<pi>\roms\windows\lemmings\lemmings-launch.log
 # =============================================================================
 
 # ===================== Settings =====================
-GAME_DIR="$HOME/RetroPie/roms/windows/lemmings"     # \\<pi>\roms\windows\lemmings
-GAME_EXE="LEMMINGS.EXE"
-
-WINE_DIR="$HOME/wine-wow64/wine/bin"
-WINE_BIN="$WINE_DIR/wine"
-WINESERVER_BIN="$WINE_DIR/wineserver"
-BOX64_BIN="$(command -v box64 || echo /usr/local/bin/box64)"
-
-export WINEPREFIX="$HOME/wine-prefixes/lemmings"
-LOG_FILE="$GAME_DIR/lemmings-launch.log"
+GAME_ID="lemmings"          # short name: its Wine prefix
+                            #   (~/wine-prefixes/lemmings) and log
+# \\<pi>\roms\windows\lemmings
+GAME_DIR="$HOME/RetroPie/roms/windows/lemmings"
+GAME_EXE="LEMMINGS.EXE"     # exactly as spelled on disk
 
 # ----- Display ----------------------------------------------------------------
 # The game's own setting: Low resolution = 640x480, High = 800x600
 GAME_RES="800x600"
-NATIVE_RES="1920x1080"      # the TV's normal mode
-SCALE_FILTER="bilinear"     # bilinear = smooth, nearest = sharp/blocky
 MAXIMISE=1                  # 1 = maximise the game window (wider view of the
                             # level, fills the TV's width - not stretched)
+BOOT_LOG_FULL=0             # start-up messages over the zoomed screen, not the
+                            # whole TV at 1:1: no Wine desktop here, so the X
+                            # screen must stay its size
+HIDE_CURSOR=0               # 1 = no mouse pointer, 0 = pointer shown
+                            #   (the game is played with the mouse)
 
-# ----- Performance / looks (1 = on, 0 = off) ----------------------------------
-X87DOUBLE=          # Box64 x87 maths: 0 = lower precision where possible (faster),
-                    #   1 = always double precision (more accurate), 2 = follows the
-                    #   game's own precision setting; empty = Box64's default (0).
-                    #   If physics/movement act oddly with 0, use 1
+# ----- Performance ------------------------------------------------------------
+FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core
+                    #   (top-left; games drawn with OpenGL only)
+                    # (Lemmings draws without OpenGL: no counter)
+VSYNC=1             # 0 = off (smoother below 60 fps, may tear)
+                    # 1 = the game decides (Mesa's default)
+                    # 2 = always on (no tearing)
+                    # (no OpenGL: makes no difference here)
+X87DOUBLE=          # Box64 x87 maths: 0 = lower precision where possible
+                    #   (faster), 1 = always double precision (more accurate),
+                    #   2 = follows the game's own precision setting;
+                    #   empty = Box64's default (0)
+                    # If physics/movement act oddly with 0, use 1
 BIGBLOCK=           # Box64 code block size 0-3 (bigger = less translating);
                     #   empty = Box64's default (2)
 CALLRET=            # Box64 call/ret optimisation (faster): 0 = off, 1 = on,
-                    #   2 = on, also for changed code; empty = Box64's default (2).
-                    #   3 = as 2, plus protection from random crashes (Box64
-                    #   built 26 Oct 2026 or later - check: box64 --version)
-                    #   Can crash some games - try 3, then 0
-DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and loading):
-                    #   empty = on, one cache shared by all games (~/.cache/box64)
-                    #   1 = on, this game's own cache (box64-cache in its prefix)
-                    #   0 = off
-CPU_PERFORMANCE=0   # CPU governor 'performance' while playing (needs passwordless sudo)
-BOOT_LOG=1          # 1 = start-up messages on screen (what Box64 and Wine are
-                    #     loading), then black until the game is ready. Also
-                    #     kept in LOG_FILE. 0 = black screen while starting
-BOOT_LOG_FULL=0     # messages over the zoomed screen, not the whole TV at 1:1:
-                    # no Wine desktop here, so the X screen must stay its size
-DEBUG=0             # 1 = Wine/Box64 errors and crash details into LOG_FILE
+                    #   2 = on, also for changed code (3 = an extra for
+                    #   LoongArch CPUs only, not the Pi); empty = Box64's
+                    #   default (2). Can crash some games - if so, try 0
+DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and
+                    #   loading): empty = on, one cache shared by all games
+                    #   (~/.cache/box64); 1 = on, this game's own cache
+                    #   (box64-cache in its prefix); 0 = off
+CPU_PERFORMANCE=0   # 1 = CPU governor 'performance' while playing
+                    #   (needs passwordless sudo), 0 = left as it is
+RDTSC_1GHZ=0        # 1 = steadier timing on the Pi's slow counter,
+                    #   0 or empty = off (Box64's default)
+DEBUG=0             # 1 = Wine/Box64 errors and crash details into the log
+                    #   (big log, slower start)
 
 # ----- Sound ------------------------------------------------------------------
-HDMI_CARD="vc4hdmi0"        # vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
-SOUNDFONT="/usr/share/sounds/sf2/FluidR3_GM.sf2"
-MIDI_GAIN=1
+SOUND_MIXER=0       # 0 = a game-only ALSA mixer: dmix -> loopback ->
+                    #     alsaloop -> HDMI. The HDMI sound stays open for the
+                    #     whole game, so no sound loses its start while the
+                    #     TV's HDMI audio wakes up. Needs alsa-utils
+                    #     (alsaloop) and snd-aloop (loaded by the script)
+                    # 1 = straight to the Pi's HDMI sound through ALSA
+                    # 2 = a private PulseAudio just for this game
+                    # If the chosen mixer can't start: straight to HDMI (1).
+                    # EmulationStation and the emulators always use plain ALSA.
+                    # HDMI port, PulseAudio buffering: .scripts/settings.cfg
+                    # (0 here: the game's sound effects and FluidSynth's MIDI
+                    #   music are mixed by it - the HDMI sound plays only one
+                    #   stream at a time)
+
+# ----- Music (MIDI) -----------------------------------------------------------
+# The game's music is MIDI, played by FluidSynth while the game plays,
+# mixed with the sound effects by the ALSA mixer (needs SOUND_MIXER=0).
+# One-off install: sudo apt install fluidsynth fluid-soundfont-gm
+MUSIC=1
+MIDI_GAIN=1                 # music volume (FluidSynth gain; 1 = loud)
 
 # ===================== Shared code =====================
-# In the ".scripts" folder next to this script: common.inc (Box64, the Wine
-# prefix, starting X, waiting for the game to close...), which also loads
-# display.inc (screen scaling and zoom, black panels, mouse fence, keyboard
-# focus, finding the game's window), sound.inc (sound mixers, FluidSynth)
-# and the start-up messages on screen (bootlog.inc, bootlog.py)
+# In the ".scripts" folder next to this script: common.inc (settings.cfg,
+# Box64, the Wine prefix, starting X, waiting for the game to close...),
+# which also loads display.inc (screen scaling and zoom, black panels, mouse
+# fence, keyboard focus, finding the game's window), sound.inc (sound
+# mixers, FluidSynth) and the start-up messages on screen (bootlog.inc,
+# bootlog.py)
 COMMON_INC="$(dirname "$(readlink -f "$0")")/.scripts/common.inc"
 if [ ! -f "$COMMON_INC" ]; then
-    echo "ERROR: $COMMON_INC not found" | tee -a "$LOG_FILE"
+    echo "ERROR: $COMMON_INC not found" | tee "${LOG_FILE:-$GAME_DIR/$GAME_ID-launch.log}"
     sleep 5; exit 1
 fi
 # shellcheck source=/dev/null
 . "$COMMON_INC"
 
 # ===================== Environment =====================
-# Wine's and Box64's messages (DEBUG, BOOT_LOG, RDTSC_1GHZ) - shared code
+# Wine's and Box64's messages (DEBUG, RDTSC_1GHZ) - shared code
 wine_logging
-box64_setup                             # Box64's settings file (4 cores) - shared code
+
+# Box64's settings file (4 cores), DYNACACHE - shared code
+box64_setup
 
 NW=${NATIVE_RES%x*}; NH=${NATIVE_RES#*x}
 # X screen: 16:9 at the game's height, plus a few pixels (xrandr rejects a
@@ -103,46 +129,26 @@ ZOOM_FB_VIEW=1
 
 # ===================== Helpers =====================
 
-# Runs before X
+# The prefix (shared code), then the registry - imported only when it
+# changes (each import is a full Box64 + Wine start-up)
 setup_prefix() {
-    prefix_setup lemmings      # (+ finishes a pending update after a new Wine)
-    # Imported only when something changes (each import is a full Box64 +
-    # Wine start-up)
-    local reg_new="$WINEPREFIX/drive_c/lemmings-settings.reg"
-    local reg_old="$WINEPREFIX/lemmings-settings.applied"
-    cat > "$reg_new" <<'EOF'
-REGEDIT4
-
-; Wine mustn't change the TV's screen mode. Managed=N: Wine draws the
-; windows' own title bars (there's no window manager to do it), so the game
-; window has its maximise button and can be maximised
+    prefix_setup
+    local reg_new="$WINEPREFIX/drive_c/$GAME_ID-settings.reg"
+    local reg_old="$WINEPREFIX/$GAME_ID-settings.applied"
+    { wine_base_reg; cat <<'EOF'
+; Managed=N: Wine draws the windows' own title bars (there's no window
+; manager to do it), so the game window has its maximise button and can be
+; maximised
 [HKEY_CURRENT_USER\Software\Wine\X11 Driver]
-"UseXRandR"="N"
-"UseXVidMode"="N"
 "Managed"="N"
-
-[HKEY_CURRENT_USER\Software\Wine\Drivers]
-"Audio"="alsa"
 EOF
+    } > "$reg_new"
     import_reg "$reg_new" "$reg_old"
 }
 
-# ----- Sound -----------------------------------------------------------------
-#  The game's sound effects and FluidSynth's music, mixed by ALSA (dmix ->
-#  loopback -> alsaloop -> HDMI) - shared code.
-start_sound() {
-    alsa_mixer_start lem                # (exports ALSA_CONFIG_PATH for Wine)
-    fluidsynth_start Lemmings
-}
-
-stop_sound() {
-    fluidsynth_stop
-    alsa_mixer_stop
-}
-
-# ----- Display ---------------------------------------------------------------
+# ----- Display ----------------------------------------------------------------
 # The game's main window (500x300 or more) is followed by the shared
-# follow_window (main, below): the Pi's GPU zooms it to fill the TV, black
+# follow_window (in_x, below): the Pi's GPU zooms it to fill the TV, black
 # panels cover the rest, and the mouse pointer is fenced onto it. Maximised
 # (MAXIMISE), the window hangs a few pixels off the X screen's edges - only
 # the part on the screen is zoomed to (FOLLOW_CLIP: the X screen can't be
@@ -156,9 +162,11 @@ stop_sound() {
 #     needs libXtst; the game remembers it, so normally only on the first
 #     run of a new Wine prefix)
 #   - gives a new dialog (e.g. "enter your name") the keyboard, and the
-#     pointer if it's on the picture
+#     pointer if it's on the picture. Only windows with a title: a
+#     drop-down menu (e.g. File) has none - moving the pointer to its
+#     middle picked an item ("Cheat this level")
 dialog_helper() {
-    python3 -I - lemmings-dialog-helper "$GAME_EXE" "$CANVAS_W" "$MAXIMISE" <<'EOF' &
+    python3 -I - "$GAME_ID-dialog-helper" "$GAME_EXE" "$CANVAS_W" "$MAXIMISE" <<'EOF' &
 import ctypes as c, ctypes.util, sys, time
 _, exe, cw, maximise = sys.argv[1:5]
 exe, cw = exe.lower().encode(), int(cw)
@@ -268,6 +276,7 @@ def focus(w):
 # A new dialog: pointer into its middle (the shared mouse fence puts it
 # back if that's off the picture) and the keyboard to it
 def focus_dialog(w, a):
+    print("Dialog: %s" % title(w).decode(errors="replace"), flush=True)
     x, y = abs_pos(w)
     x11.XWarpPointer(dpy, 0, root, 0, 0, 0, 0, x + a.width // 2, y + a.height // 2)
     focus(w)
@@ -304,8 +313,8 @@ while True:
         if a.width >= 500 and a.height >= 300:          # the main window
             if a.width * a.height > best:
                 main, best = (a.width, a.height) + abs_pos(w), a.width * a.height
-        elif w not in seen:                             # a new dialog
-            seen.add(w)
+        elif w not in seen and title(w):                # a new dialog (a
+            seen.add(w)                                 #   menu has no title)
             dialogs.append((w, a))
     for w, a in dialogs:
         if (not ok_done and time.time() - start < 60 and a.width < 500 and a.height < 250
@@ -316,7 +325,8 @@ while True:
             focus_dialog(w, a)
         ok_done = True
     if main:
-        ok_done = True                       # main window up - no warning to close
+        ok_done = True                       # main window up - no
+                                             #   warning to close
         if not max_done:
             max_done = True
             if main[0] < cw - 16:            # narrower than the screen
@@ -324,64 +334,37 @@ while True:
 EOF
 }
 
-cleanup() {
-    stop_boot_log
-    [ -n "$WATCH_PID" ] && kill "$WATCH_PID" 2>/dev/null
-    pkill -f lemmings-dialog-helper 2>/dev/null
-    panels_stop
-    wineserver -k 2>/dev/null
-    restore_governor
+# Inside X (from launch, shared code)
+in_x() {
+    xsetroot -solid black 2>/dev/null
+    # The whole screen until the game shows (shared code; no zoom: no
+    # follower either)
+    zoom_start "" "$CANVAS_W" "$CANVAS_H"
+    start_boot_log "$START_GEO" "$GAME_EXE"
+    set_governor
+    setup_prefix
+    setup_done              # (the start-up messages time the game from here)
+    sound_mixer_start "$GAME_ID"
+    # Music: FluidSynth must be running before Wine starts, so the game finds it
+    if [ "$MUSIC" = "1" ]; then
+        if [ "$SOUND_MIXER" = "0" ]; then
+            fluidsynth_start "$GAME_ID"
+        else
+            echo "WARNING: music needs the ALSA mixer (SOUND_MIXER=0) - no music"
+        fi
+    fi
+    cd "$GAME_DIR" || exit 1
+    log_settings MAXIMISE MUSIC
+    # The game's main window, followed (shared code - see Display above)
+    FOLLOW_FENCE=1 FOLLOW_CLIP="$CANVAS_W $CANVAS_H" follow_start 500 300
+    if command -v python3 >/dev/null; then
+        dialog_helper
+        cleanup_add "$GAME_ID-dialog-helper"
+    else
+        echo "WARNING: python3 not found - start-up warning not closed, window not maximised"
+    fi
+    wine "$GAME_EXE"
 }
 
 # ===================== Main =====================
-if [ "$1" = "--kill" ]; then
-    kill_game                       # (shared code)
-    exit 0
-fi
-
-if [ "$1" != "--in-x" ]; then
-    # From EmulationStation: start X just for the game, on ES's console, so
-    # it exits cleanly back to ES
-    check_files "$GAME_DIR/$GAME_EXE"
-    echo "=== $(date) ===" > "$LOG_FILE"
-    {
-        stop_wine                   # (shared code)
-        setup_prefix
-    } >> "$LOG_FILE" 2>&1
-
-    trap stop_sound EXIT
-    trap 'exit 1' INT TERM
-    start_sound >> "$LOG_FILE" 2>&1
-
-    start_x -quiet
-    exit 0                              # (the EXIT trap stops the sound)
-fi
-
-# ----- Inside X -----
-exec >> "$LOG_FILE" 2>&1
-trap cleanup EXIT INT TERM
-xset s off -dpms s noblank 2>/dev/null
-xsetroot -solid black 2>/dev/null
-
-if display_output "no zooming"; then
-    zoom_to "$CANVAS_W" "$CANVAS_H" 0 0     # whole screen until the game shows
-    if command -v xwininfo >/dev/null; then
-        # The game's main window, followed (shared code - see Display above)
-        START_GEO="$CANVAS_W $CANVAS_H 0 0" FOLLOW_PANELS=lemmings-panels FOLLOW_FENCE=1 \
-            FOLLOW_CLIP="$CANVAS_W $CANVAS_H" follow_window 500 300 &
-        WATCH_PID=$!
-    else
-        echo "WARNING: xwininfo not found (sudo apt install x11-utils) - no zoom"
-    fi
-fi
-if command -v python3 >/dev/null; then
-    dialog_helper
-else
-    echo "WARNING: python3 not found - start-up warning not closed, window not maximised"
-fi
-start_boot_log "$CANVAS_W $CANVAS_H 0 0" "$GAME_EXE"
-set_governor
-
-cd "$GAME_DIR" || exit 1
-wine "$GAME_EXE"
-exit 0
+launch "$@"                 # (shared code: --kill, X, then in_x)

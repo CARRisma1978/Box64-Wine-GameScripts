@@ -9,7 +9,7 @@
 #   - PINBALL.EXE draws with plain GDI (no Direct3D/OpenGL), so there are no
 #     Mesa or wined3d settings to tune - the only graphics work is the zoom.
 #   - Bare X, no window manager. Every program in the prefix runs in a Wine
-#     desktop of GAME_RES. The TV stays at NATIVE_RES.
+#     desktop of GAME_RES. The TV stays at its normal mode.
 #   - The game runs in its normal window (title bar and menu). A helper finds
 #     that window and has the Pi's display hardware zoom it to fill the TV,
 #     keeping its shape (free - no GL work). Black panels cover the TV beside
@@ -24,8 +24,6 @@
 #     for a driver called "PINBALL.MID" and gives up). So the script plays
 #     PINBALL.MID itself, on a loop, into FluidSynth (aplaymidi), and keeps
 #     the game's own Music option off. It plays on through pauses (F3).
-#   - Prefix setup runs BEFORE X starts, with Wine fully stopped afterwards,
-#     and registry settings are imported only when they change.
 #
 #  Keys: Z / / = flippers, Space = plunger, X . Up = nudge, F2 = new game,
 #        F3 = pause, F8 = player controls, Alt+F4 = quit back to
@@ -36,20 +34,16 @@
 #  To close a stuck game over SSH:
 #      bash ~/RetroPie/roms/windows/3DPinball.sh --kill
 #
-#  Log (overwritten each launch): \\<pi>\roms\windows\3DPinball\pinball-launch.log
+#  Log (overwritten each launch):
+#     \\<pi>\roms\windows\3DPinball\3dpinball-launch.log
 # =============================================================================
 
 # ===================== Settings =====================
-GAME_DIR="$HOME/RetroPie/roms/windows/3DPinball"   # \\<pi>\roms\windows\3DPinball
-GAME_EXE="PINBALL.EXE"                             # Linux is case-sensitive
-
-WINE_DIR="$HOME/wine-wow64/wine/bin"
-WINE_BIN="$WINE_DIR/wine"
-WINESERVER_BIN="$WINE_DIR/wineserver"
-BOX64_BIN="$(command -v box64 || echo /usr/local/bin/box64)"
-
-export WINEPREFIX="$HOME/wine-prefixes/3dpinball"
-LOG_FILE="$GAME_DIR/pinball-launch.log"
+GAME_ID="3dpinball"         # short name: its Wine prefix
+                            #   (~/wine-prefixes/3dpinball) and log
+# \\<pi>\roms\windows\3DPinball
+GAME_DIR="$HOME/RetroPie/roms/windows/3DPinball"
+GAME_EXE="PINBALL.EXE"      # exactly as spelled on disk
 
 # ----- Display ----------------------------------------------------------------
 # GAME_RES = the Wine desktop. The XP version only has the 640x480 table
@@ -57,66 +51,87 @@ LOG_FILE="$GAME_DIR/pinball-launch.log"
 # window is zoomed to fill the TV (about 2.3x), so any desktop it fits in
 # will do.
 GAME_RES="1920x1080"
-NATIVE_RES="1920x1080"      # the TV's normal mode
-SCALE_FILTER="bilinear"     # bilinear = smooth, nearest = sharp/blocky
-HIDE_CURSOR=0               # 1 = no X pointer (the game is played on the keyboard;
-                            #     menus still work with Alt + underlined letter)
-BLOCK_ESC=1                 # 1 = Esc does nothing. The game's Esc is a "boss key":
-                            #     it hides (minimises) the game, and with no taskbar
-                            #     there's no way to bring it back - just a black
-                            #     screen. 0 = Esc goes to the game as normal
+HIDE_CURSOR=0               # 1 = no mouse pointer, 0 = pointer shown
+                            #   (the game is played on the keyboard; menus still
+                            #   work with Alt + underlined letter)
+BLOCK_ESC=1                 # 1 = Esc does nothing. The game's Esc is a "boss
+                            #     key": it hides (minimises) the game, and
+                            #     with no taskbar there's no way to bring it
+                            #     back - just a black screen. 0 = Esc goes to
+                            #     the game as normal
 
-# ----- Performance / looks (1 = on, 0 = off) ----------------------------------
-X87DOUBLE=          # Box64 x87 maths: 0 = lower precision where possible (faster),
-                    #   1 = always double precision (more accurate), 2 = follows the
-                    #   game's own precision setting; empty = Box64's default (0).
-                    #   If the ball moves oddly (sticks, falls through), use 1
+# ----- Performance ------------------------------------------------------------
+FPS_HUD=0           # 0 = off, 1 = fps + total CPU, 2 = fps + each CPU core
+                    #   (top-left; games drawn with OpenGL only)
+                    # (the game draws without OpenGL: no counter)
+VSYNC=1             # 0 = off (smoother below 60 fps, may tear)
+                    # 1 = the game decides (Mesa's default)
+                    # 2 = always on (no tearing)
+                    # (no OpenGL: makes no difference here)
+X87DOUBLE=          # Box64 x87 maths: 0 = lower precision where possible
+                    #   (faster), 1 = always double precision (more accurate),
+                    #   2 = follows the game's own precision setting;
+                    #   empty = Box64's default (0)
+                    # If the ball moves oddly (sticks, falls through), use 1
 BIGBLOCK=           # Box64 code block size 0-3 (bigger = less translating);
                     #   empty = Box64's default (2)
 CALLRET=            # Box64 call/ret optimisation (faster): 0 = off, 1 = on,
-                    #   2 = on, also for changed code; empty = Box64's default (2).
-                    #   3 = as 2, plus protection from random crashes (Box64
-                    #   built 26 Oct 2026 or later - check: box64 --version)
-                    #   Can crash some games - try 3, then 0
-DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and loading):
-                    #   empty = on, one cache shared by all games (~/.cache/box64)
-                    #   1 = on, this game's own cache (box64-cache in its prefix)
-                    #   0 = off
-CPU_PERFORMANCE=0   # CPU governor 'performance' while playing (needs passwordless sudo)
-BOOT_LOG=1          # 1 = start-up messages on screen (what Box64 and Wine are
-                    #     loading), then black until the game is ready. Also
-                    #     kept in LOG_FILE. 0 = black screen while starting
-RDTSC_1GHZ=0        # 1 = steadier timing on the Pi's slow counter - try if
-                    #     the ball's movement looks uneven
+                    #   2 = on, also for changed code (3 = an extra for
+                    #   LoongArch CPUs only, not the Pi); empty = Box64's
+                    #   default (2). Can crash some games - if so, try 0
+DYNACACHE=          # Box64 keeps translated code on disk (quicker starts and
+                    #   loading): empty = on, one cache shared by all games
+                    #   (~/.cache/box64); 1 = on, this game's own cache
+                    #   (box64-cache in its prefix); 0 = off
+CPU_PERFORMANCE=0   # 1 = CPU governor 'performance' while playing
+                    #   (needs passwordless sudo), 0 = left as it is
+RDTSC_1GHZ=0        # 1 = steadier timing on the Pi's slow counter,
                     #   0 or empty = off (Box64's default)
-DEBUG=0             # 1 = Wine/Box64 errors into LOG_FILE (big log, slower start)
+                    # (try 1 if the ball's movement looks uneven)
+DEBUG=0             # 1 = Wine/Box64 errors and crash details into the log
+                    #   (big log, slower start)
 
 # ----- Sound ------------------------------------------------------------------
-MUSIC=1                     # 1 = music on: PINBALL.MID on a loop through FluidSynth
-                            #     (played by the script - see "Music" above)
-                            # 0 = sound effects only (plain ALSA, no mixer)
-                            # (the game's own Music menu option does nothing here)
-HDMI_CARD="vc4hdmi0"        # vc4hdmi0 = HDMI port 0, vc4hdmi1 = port 1
-SOUNDFONT="/usr/share/sounds/sf2/FluidR3_GM.sf2"
-MIDI_GAIN=1
+SOUND_MIXER=0       # 0 = a game-only ALSA mixer: dmix -> loopback ->
+                    #     alsaloop -> HDMI. The HDMI sound stays open for the
+                    #     whole game, so no sound loses its start while the
+                    #     TV's HDMI audio wakes up. Needs alsa-utils
+                    #     (alsaloop) and snd-aloop (loaded by the script)
+                    # 1 = straight to the Pi's HDMI sound through ALSA
+                    # 2 = a private PulseAudio just for this game
+                    # If the chosen mixer can't start: straight to HDMI (1).
+                    # EmulationStation and the emulators always use plain ALSA.
+                    # HDMI port, PulseAudio buffering: .scripts/settings.cfg
+                    # (0 here: the game's sound effects and FluidSynth's MIDI
+                    #   music are mixed by it - the HDMI sound plays only one
+                    #   stream at a time)
+
+# ----- Music (MIDI) -----------------------------------------------------------
+MUSIC=1                     # 1 = music on: PINBALL.MID on a loop through
+                            #     FluidSynth (played by the script - see "Music"
+                            #     above; needs SOUND_MIXER=0)
+                            # 0 = sound effects only
+                            # (the game's own Music menu option does
+                            # nothing here)
+MIDI_GAIN=1                 # music volume (FluidSynth gain; 1 = loud)
 
 # ===================== Shared code =====================
-# In the ".scripts" folder next to this script: common.inc (Box64, the Wine
-# prefix, starting X, waiting for the game to close...), which also loads
-# display.inc (screen scaling and zoom, black panels, mouse fence, keyboard
-# focus, finding the game's window), sound.inc (sound mixers, FluidSynth)
-# and the start-up messages on screen (bootlog.inc, bootlog.py)
+# In the ".scripts" folder next to this script: common.inc (settings.cfg,
+# Box64, the Wine prefix, starting X, waiting for the game to close...),
+# which also loads display.inc (screen scaling and zoom, black panels, mouse
+# fence, keyboard focus, finding the game's window), sound.inc (sound
+# mixers, FluidSynth) and the start-up messages on screen (bootlog.inc,
+# bootlog.py)
 COMMON_INC="$(dirname "$(readlink -f "$0")")/.scripts/common.inc"
 if [ ! -f "$COMMON_INC" ]; then
-    echo "ERROR: $COMMON_INC not found" | tee -a "$LOG_FILE"
+    echo "ERROR: $COMMON_INC not found" | tee "${LOG_FILE:-$GAME_DIR/$GAME_ID-launch.log}"
     sleep 5; exit 1
 fi
 # shellcheck source=/dev/null
 . "$COMMON_INC"
 
 # ===================== Environment =====================
-
-# Wine's and Box64's messages (DEBUG, BOOT_LOG, RDTSC_1GHZ) - shared code
+# Wine's and Box64's messages (DEBUG, RDTSC_1GHZ) - shared code
 wine_logging
 
 # Box64's settings file (4 cores, speed settings for the game),
@@ -127,34 +142,18 @@ GW=${GAME_RES%x*}; GH=${GAME_RES#*x}
 
 # ===================== Helpers =====================
 
-# Runs before X, with Wine fully stopped afterwards
+# The prefix (shared code), then the registry - imported only when it
+# changes (each import is a full Box64 + Wine start-up)
 setup_prefix() {
-    prefix_setup pinball      # (+ finishes a pending update after a new Wine)
-
-    # All settings in ONE import, only when something changed (each import
-    # is a full Box64 + Wine start-up)
-    local reg_new="$WINEPREFIX/drive_c/pinball-settings.reg" reg_old="$WINEPREFIX/pinball-settings.applied"
-    cat > "$reg_new" <<EOF
-REGEDIT4
-
-; Wine mustn't change the TV's screen mode, or react to the GPU zoom
-[HKEY_CURRENT_USER\\Software\\Wine\\X11 Driver]
-"UseXRandR"="N"
-"UseXVidMode"="N"
-
-; Black Wine desktop (shows briefly before the game window)
-[HKEY_CURRENT_USER\\Control Panel\\Colors]
-"Background"="0 0 0"
-
-; Sound through ALSA (the mixer below, when MUSIC=1)
-[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]
-"Audio"="alsa"
-
-; Software-mixed DirectSound (fixed hangs in mk4, quake2 and nfs6)
-[HKEY_CURRENT_USER\\Software\\Wine\\DirectSound]
-"HardwareAcceleration"="Emulation"
-EOF
+    prefix_setup
+    local reg_new="$WINEPREFIX/drive_c/$GAME_ID-settings.reg"
+    local reg_old="$WINEPREFIX/$GAME_ID-settings.applied"
+    wine_base_reg dsound > "$reg_new"
     import_reg "$reg_new" "$reg_old"
+    wineserver -w
+    # The game's own music never plays under Wine - kept off, so it can't
+    # double up with the script's if a later Wine fixes it
+    game_option Music 0             # (Wine is stopped here)
 }
 
 # game_option name 0|1 - sets one of the game's own options (a dword in
@@ -174,7 +173,8 @@ game_option() {
         FNR == 1 && !sec { exit 3 }
         /^\[/ { ins = (FNR == sec) }
         ins && index($0, name "=") == 1 { $0 = name "=" val; done = 1 }
-        ins && $0 == "" && !done { print name "=" val; done = 1 }   # (not there yet)
+        # (not there yet)
+        ins && $0 == "" && !done { print name "=" val; done = 1 }
         { print }
         END { if (ins && !done) print name "=" val }
     ' "$reg" "$reg" > "$tmp"
@@ -188,17 +188,10 @@ game_option() {
 }
 
 # ----- Sound ------------------------------------------------------------------
-#  The game's sound effects and FluidSynth's music, mixed by ALSA (dmix ->
-#  loopback -> alsaloop -> HDMI) - shared code.
-start_sound() {
-    [ "$MUSIC" = "1" ] || return 0
-    alsa_mixer_start pinball            # (exports ALSA_CONFIG_PATH for Wine)
-    fluidsynth_start Pinball
-}
-
 # start_music - PINBALL.MID on a loop into FluidSynth, in the background
-# (one small "pinball-music" loop; aplaymidi from alsa-utils). Started when
-# the game's window first appears; ended by cleanup.
+# (one small "$GAME_ID-music" loop; aplaymidi from alsa-utils). Started when
+# the game's window first appears; ended by the shared cleanup
+# (cleanup_add in in_x).
 start_music() {
     [ "$MUSIC" = "1" ] || return 0
     local mid
@@ -207,43 +200,20 @@ start_music() {
     command -v aplaymidi >/dev/null || { echo "WARNING: aplaymidi not found (alsa-utils) - no music"; return 0; }
     echo "Music: $(basename "$mid") on a loop"
     # (a failed play waits 2 s before trying again, not a tight loop)
-    bash -c 'while :; do aplaymidi -p "FLUID Synth (Pinball)" "$1" || sleep 2; sleep 0.5; done' \
-        pinball-music "$mid" &
-}
-
-stop_music() {
-    pkill -u "$(id -u)" -f pinball-music 2>/dev/null
-    pkill -u "$(id -u)" -x aplaymidi 2>/dev/null
-}
-
-stop_sound() {
-    fluidsynth_stop
-    alsa_mixer_stop
+    bash -c 'while :; do aplaymidi -p "FLUID Synth ($2)" "$1" || sleep 2; sleep 0.5; done' \
+        "$GAME_ID-music" "$mid" "$GAME_ID" &
 }
 
 # ----- Display ----------------------------------------------------------------
-# The game's window is followed by the shared follow_window (Inside X,
-# below): the whole Wine desktop until the window appears, then the TV is
-# zoomed onto it - as big as fits, its shape kept - and again if it moves or
+# The game's window is followed by the shared follow_window (in_x, below):
+# the whole Wine desktop until the window appears, then the TV is zoomed
+# onto it - as big as fits, its shape kept - and again if it moves or
 # changes size. Black panels cover the TV beside the window and fence the
 # mouse pointer into it. The music starts when the window first appears.
 follow_window_hook() {
     [ -n "$MUSIC_ON" ] && return 0
     MUSIC_ON=1
     start_music
-}
-
-run_game() {
-    cd "$GAME_DIR" || exit 1
-    echo "=== $(date) === GAME_RES=$GAME_RES MUSIC=$MUSIC"
-    # In its normal window (zoomed by follow_window), in a Wine desktop the
-    # script starts itself. (Box64 0.4.5 of 2026-10-23: the desktop Wine
-    # starts on its own for "wine start" hung - no window, back to ES.)
-    wine explorer /desktop=pinball,"$GAME_RES" "$GAME_EXE" &
-    # Back as soon as Wine has finished after the game closes - or 2 seconds
-    # later (shared code; cleanup then ends it): the desktop stays open
-    # after the game, so Wine never finishes by itself
-    WINE_EXIT_WAIT=2 wait_for_game $! "$GAME_EXE"
 }
 
 # BLOCK_ESC=1: the Esc key gives no key at all in this X session (just
@@ -259,58 +229,45 @@ block_esc() {
     [ "$found" = "1" ] || echo "WARNING: Esc not found in X's key map - not blocked"
 }
 
-cleanup() {
-    stop_boot_log
-    [ -n "$WATCH_PID" ] && kill "$WATCH_PID" 2>/dev/null
-    stop_music
-    panels_stop
-    wineserver -k 2>/dev/null
-    restore_governor
+# Inside X (from launch, shared code)
+in_x() {
+    xsetroot -solid black 2>/dev/null
+    block_esc
+    zoom_start "" "$GW" "$GH"   # the whole desktop until the window shows
+                                #   (shared code)
+    start_boot_log "$START_GEO" "$GAME_EXE"
+    set_governor
+    setup_prefix
+    setup_done              # (the start-up messages time the game from here)
+    sound_mixer_start "$GAME_ID"
+    # Music: FluidSynth must be running before Wine starts (the loop into it
+    # starts with the game's window - follow_window_hook)
+    if [ "$MUSIC" = "1" ]; then
+        if [ "$SOUND_MIXER" != "0" ]; then
+            echo "WARNING: music needs the ALSA mixer (SOUND_MIXER=0) - no music"
+            MUSIC=0
+        elif ! fluidsynth_start "$GAME_ID"; then
+            MUSIC=0
+        fi
+    fi
+    if [ "$MUSIC" = "1" ]; then
+        # The music loop is started by the window follower (a background
+        # helper), so it's added to the shared cleanup here
+        cleanup_add "$GAME_ID-music"
+        cleanup_add "aplaymidi -p FLUID Synth"
+    fi
+    cd "$GAME_DIR" || exit 1
+    log_settings MUSIC BLOCK_ESC
+    FOLLOW_FENCE=1 follow_start     # (shared code; starts from START_GEO)
+    # In its normal window (zoomed by follow_window), in a Wine desktop the
+    # script starts itself. (Box64 0.4.5 of 2026-10-23: the desktop Wine
+    # starts on its own for "wine start" hung - no window, back to ES.)
+    wine explorer /desktop="$GAME_ID","$GAME_RES" "$GAME_EXE" &
+    # Back as soon as Wine has finished after the game closes - or 2 seconds
+    # later (shared code; the shared cleanup then ends it): the desktop stays
+    # open after the game, so Wine never finishes by itself
+    WINE_EXIT_WAIT=2 wait_for_game $! "$GAME_EXE"
 }
 
 # ===================== Main =====================
-if [ "$1" = "--kill" ]; then
-    kill_game                       # (shared code)
-    stop_music
-    exit 0
-fi
-
-if [ "$1" != "--in-x" ]; then
-    # From EmulationStation: prefix setup and sound first (no X needed), then
-    # X just for the game, on ES's console, so it exits cleanly back to ES
-    check_files "$GAME_DIR/$GAME_EXE"
-    : > "$LOG_FILE"
-    trap stop_sound EXIT
-    trap 'exit 1' INT TERM
-    {
-        stop_wine                   # (shared code)
-        start_sound
-        setup_prefix
-        # The game's own music never plays under Wine - kept off, so it
-        # can't double up with the script's if a later Wine fixes it
-        game_option Music 0             # (Wine is stopped here)
-    } >> "$LOG_FILE" 2>&1
-
-    NOCURSOR=""; [ "$HIDE_CURSOR" = "1" ] && NOCURSOR="-nocursor"
-    # shellcheck disable=SC2086
-    start_x $NOCURSOR -quiet
-    wineserver -k 2>/dev/null       # make sure nothing is left running
-    exit 0                          # (the EXIT trap stops the sound)
-fi
-
-# ----- Inside X -----
-exec >> "$LOG_FILE" 2>&1
-trap cleanup EXIT INT TERM
-xset s off -dpms s noblank 2>/dev/null   # no screen blanking (the demo/attract
-                                         # mode runs with no key pressed)
-xsetroot -solid black 2>/dev/null
-block_esc
-if display_output "no zooming"; then
-    START_GEO="$GW $GH 0 0" FOLLOW_PANELS=pinball-panels FOLLOW_FENCE=1 \
-        follow_window &                 # (shared code)
-    WATCH_PID=$!
-fi
-start_boot_log "$GW $GH 0 0" "$GAME_EXE"
-set_governor
-run_game
-exit 0
+launch "$@"                 # (shared code: --kill, X, then in_x)
